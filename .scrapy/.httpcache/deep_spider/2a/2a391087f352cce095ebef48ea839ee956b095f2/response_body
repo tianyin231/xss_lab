@@ -1,0 +1,2005 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>天赐云校园服务信息平台</title>
+    <link rel="stylesheet" href="/static/css/styles.css">
+    <!-- <link href="./main.min.css" rel="stylesheet">
+    <script src="./main.min.js"></script> -->
+    <link href="https://cdn.jsdelivr.net/npm/vanilla-calendar-pro/build/vanilla-calendar.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/vanilla-calendar-pro/build/vanilla-calendar.min.js"></script>
+    <!-- 校历 FullCalendar CSS -->
+    <link href='https://cdn.jsdelivr.net/npm/fullcalendar@5.11.3/main.min.css' rel='stylesheet' />
+    <!-- 校历 FullCalendar JS -->
+    <script src='https://cdn.jsdelivr.net/npm/fullcalendar@5.11.3/main.min.js'></script>
+    <script src='https://cdn.jsdelivr.net/npm/fullcalendar@5.11.3/locales/zh-cn.js'></script>
+    <style>
+        /* 模态框通用样式 - 只适用于首页特定模态框，不影响导航栏中的认证模态框 */
+        #feedbackModal,
+        #loginRequiredModal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            overflow-y: auto;
+            opacity: 0;
+            transition: opacity 0.3s ease-in-out;
+            backdrop-filter: blur(2px);
+        }
+
+        #feedbackModal[style*="display: block"],
+        #loginRequiredModal[style*="display: block"] {
+            opacity: 1;
+        }
+
+        #feedbackModal .modal-content,
+        #loginRequiredModal .modal-content {
+            background-color: var(--card-background, #fff);
+            margin: 10% auto;
+            padding: 25px;
+            border-radius: 12px;
+            width: 90%;
+            max-width: 500px;
+            /* 减小宽度 */
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.15);
+            transform: translateY(-20px);
+            transition: transform 0.3s ease-in-out;
+            position: relative;
+            border: 1px solid rgba(0, 0, 0, 0.05);
+        }
+
+        #feedbackModal[style*="display: block"] .modal-content,
+        #loginRequiredModal[style*="display: block"] .modal-content {
+            transform: translateY(0);
+        }
+
+        #feedbackModal .modal-header,
+        #loginRequiredModal .modal-header {
+            border-bottom: 1px solid var(--border-color, #eee);
+            padding-bottom: 18px;
+            margin-bottom: 20px;
+        }
+
+        #feedbackModal .modal-title,
+        #loginRequiredModal .modal-title {
+            font-size: 24px;
+            color: var(--text-color, #333);
+            margin: 0;
+            font-weight: 600;
+        }
+
+        #feedbackModal .close,
+        #loginRequiredModal .close {
+            color: var(--text-color, #333);
+            position: absolute;
+            right: 20px;
+            top: 18px;
+            font-size: 24px;
+            cursor: pointer;
+            transition: opacity 0.3s, transform 0.2s;
+            opacity: 0.6;
+            width: 30px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+        }
+
+        #feedbackModal .close:hover,
+        #loginRequiredModal .close:hover {
+            opacity: 1;
+            background-color: rgba(0, 0, 0, 0.05);
+            transform: rotate(90deg);
+        }
+
+        .modal-form {
+            margin-top: 15px;
+        }
+
+        /* 以下样式仅适用于反馈模态框 */
+        #feedbackModal .form-group {
+            margin-bottom: 20px;
+        }
+
+        #feedbackModal .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            color: var(--text-color, #333);
+            font-weight: 500;
+        }
+
+        #feedbackModal .form-control {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid var(--border-color, #ddd);
+            border-radius: 8px;
+            background-color: var(--input-background, #f8f9fa);
+            color: var(--text-color, #333);
+            font-size: 14px;
+            transition: border-color 0.3s, box-shadow 0.3s;
+        }
+
+        #feedbackModal .form-control:focus {
+            border-color: var(--primary-color, #3498db);
+            outline: none;
+            box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.25);
+        }
+
+        #feedbackModal textarea.form-control {
+            min-height: 120px;
+            resize: vertical;
+        }
+
+        /* Tab样式 */
+        #feedbackTabs {
+            display: flex;
+            border-bottom: 1px solid var(--border-color, #eee);
+            margin-bottom: 20px;
+            gap: 10px;
+        }
+
+        #feedbackTabs .btn {
+            padding: 8px 15px;
+            border: none;
+            background: transparent;
+            color: var(--text-color, #555);
+            border-bottom: 2px solid transparent;
+            border-radius: 4px 4px 0 0;
+            transition: all 0.2s;
+            margin-bottom: -1px;
+            position: relative;
+        }
+
+        #feedbackTabs .btn.active {
+            color: #2c3e50;
+            border-bottom: 2px solid #3498db;
+            background-color: rgba(52, 152, 219, 0.12);
+            font-weight: 600;
+        }
+
+        #feedbackTabs .btn:hover:not(.active) {
+            background-color: rgba(0, 0, 0, 0.03);
+            color: var(--text-color, #333);
+        }
+
+        .btn-row {
+            display: flex;
+            justify-content: flex-end;
+            gap: 12px;
+            margin-top: 25px;
+        }
+
+        .btn {
+            padding: 10px 18px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            border: none;
+            transition: background-color 0.3s, transform 0.2s, box-shadow 0.2s;
+        }
+
+        .btn-default {
+            background-color: #f0f0f0;
+            color: #333;
+        }
+
+        .btn-default:hover {
+            background-color: #e0e0e0;
+            transform: translateY(-2px);
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+        }
+
+        .btn-primary {
+            background-color: #3498db;
+            color: white;
+            box-shadow: 0 2px 4px rgba(52, 152, 219, 0.25);
+        }
+
+        .btn-primary:hover {
+            background-color: #2980b9;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(52, 152, 219, 0.3);
+        }
+
+        .category-badge {
+            display: inline-block;
+            padding: 4px 10px;
+            background-color: var(--secondary-color, #3498db);
+            color: white;
+            border-radius: 20px;
+            font-size: 12px;
+            margin-right: 8px;
+            font-weight: 500;
+        }
+
+        .no-content {
+            text-align: center;
+            padding: 40px;
+            color: var(--text-color);
+            font-size: 16px;
+            opacity: 0.7;
+        }
+
+        /* 反馈按钮样式 */
+        .feedback-button {
+            background-color: #2ecc71;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            padding: 10px 20px;
+            cursor: pointer;
+            transition: background-color 0.3s, transform 0.2s;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .feedback-button:hover {
+            background-color: #27ae60;
+            transform: translateY(-2px);
+        }
+
+        .feedback-button svg {
+            width: 16px;
+            height: 16px;
+        }
+
+        /* 快速功能卡片 */
+        .quick-card-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+        
+        .quick-card {
+            background-color: #fff;
+            border-radius: 10px;
+            padding: 20px;
+            text-align: center;
+            box-shadow: 0 3px 10px rgba(0,0,0,0.08);
+            transition: all 0.3s ease;
+            border: 1px solid rgba(0,0,0,0.05);
+            cursor: pointer;
+        }
+        
+        .quick-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+        
+        .quick-card i {
+            display: block;
+            font-size: 32px;
+            margin-bottom: 15px;
+            color: #3498db;
+        }
+        
+        .quick-card h3 {
+            margin: 0;
+            font-size: 16px;
+        }
+        
+        /* 搜索栏样式 */
+        .search-container {
+            margin: 20px auto;
+            max-width: 700px;
+            position: relative;
+        }
+        
+        .search-bar {
+            width: 100%;
+            padding: 15px 20px;
+            padding-left: 50px;
+            border: none;
+            border-radius: 30px;
+            font-size: 16px;
+            box-shadow: 0 3px 15px rgba(0,0,0,0.1);
+            transition: all 0.3s ease;
+        }
+        
+        .search-bar:focus {
+            box-shadow: 0 5px 20px rgba(0,0,0,0.15);
+            outline: none;
+        }
+        
+        .search-icon {
+            position: absolute;
+            left: 20px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #666;
+            font-size: 20px;
+        }
+        
+        /* 历史搜索样式 */
+        .search-history {
+            background: white;
+            border-radius: 15px;
+            padding: 10px 15px;
+            margin-top: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+            display: none;
+            max-width: 700px;
+            margin: 10px auto 0;
+        }
+        
+        .search-history.show {
+            display: block;
+        }
+        
+        .search-history-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        
+        .search-history-title {
+            font-size: 14px;
+            font-weight: 500;
+            color: #666;
+        }
+        
+        .clear-history {
+            font-size: 12px;
+            color: #3498db;
+            cursor: pointer;
+            border: none;
+            background: transparent;
+            padding: 0;
+        }
+        
+        .clear-history:hover {
+            text-decoration: underline;
+        }
+        
+        .history-items {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        
+        .history-item {
+            display: inline-flex;
+            align-items: center;
+            padding: 6px 12px;
+            background-color: #f1f1f1;
+            border-radius: 20px;
+            font-size: 13px;
+            color: #555;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .history-item:hover {
+            background-color: #e1e1e1;
+        }
+        
+        .history-item i {
+            font-size: 12px;
+            margin-right: 5px;
+            color: #999;
+        }
+        
+        /* 天气卡片样式 */
+        .weather-card {
+            background-color: #fff;
+            border-radius: 10px;
+            padding: 15px 20px;
+            box-shadow: 0 3px 10px rgba(0,0,0,0.08);
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        
+        .weather-info {
+            display: flex;
+            align-items: center;
+        }
+        
+        .weather-temp {
+            font-size: 36px;
+            font-weight: bold;
+            margin-right: 15px;
+        }
+        
+        .weather-icon {
+            font-size: 40px;
+            color: #f39c12;
+            margin-right: 15px;
+        }
+        
+        .weather-details {
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .weather-location {
+            font-size: 16px;
+            font-weight: 500;
+        }
+        
+        .weather-description {
+            font-size: 14px;
+            color: #666;
+        }
+        
+        .weather-forecast {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .forecast-day {
+            text-align: center;
+            min-width: 60px;
+        }
+        
+        .forecast-day-name {
+            font-size: 12px;
+            margin-bottom: 5px;
+        }
+        
+        .forecast-icon {
+            font-size: 20px;
+            margin-bottom: 5px;
+            color: #f39c12;
+        }
+        
+        .forecast-temp {
+            font-size: 14px;
+        }
+
+        /* 校园官网导航 */
+        .website-section {
+            margin: 20px 0;
+        }
+
+        .website-links {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            margin: 20px 0;
+            justify-content: center;
+        }
+
+        .website-links a {
+            background-color: #f5f5f5;
+            padding: 15px 25px;
+            text-decoration: none;
+            color: #555;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+            transition: all 0.3s ease;
+            font-weight: 500;
+            text-align: center;
+            flex: 0 0 auto;
+            min-width: 140px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .website-links a:hover {
+            background-color: #e8f4fd;
+            color: #3498db;
+            transform: translateY(-3px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+        
+        .website-links a.active {
+            background-color: #e8f4fd;
+            color: #3498db;
+            border-left: 3px solid #3498db;
+        }
+
+        .function-buttons {
+            display: flex;
+            gap: 15px;
+            margin-top: 20px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        .function-button {
+            background-color: #f5f5f5;
+            color: #555;
+            border: none;
+            padding: 12px 25px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-size: 14px;
+            font-weight: 500;
+            flex: 0 0 auto;
+            min-width: 140px;
+            text-align: center;
+        }
+
+        .function-button:hover {
+            background-color: #e8f4fd;
+            color: #3498db;
+            transform: translateY(-3px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+        
+        .function-button.active {
+            background-color: #e8f4fd;
+            color: #3498db;
+            border-left: 3px solid #3498db;
+        }
+        
+        .feedback-button {
+            background-color: #f5f5f5;
+            color: #555;
+            border: none;
+            border-radius: 6px;
+            padding: 10px 20px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+        }
+
+        .feedback-button:hover {
+            background-color: #e8f4fd;
+            color: #3498db;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+        
+        /* 媒体查询 - 小屏幕适配 */
+        @media screen and (max-width: 768px) {
+            .website-links {
+                gap: 12px;
+                justify-content: center;
+            }
+            
+            .website-links a {
+                padding: 12px 10px;
+                font-size: 13px;
+                width: calc(50% - 6px);
+                flex: 0 0 calc(50% - 6px);
+                min-width: 0;
+                height: 45px;
+            }
+            
+            .function-buttons {
+                flex-direction: row;
+                flex-wrap: wrap;
+                gap: 12px;
+                justify-content: center;
+            }
+            
+            .function-button {
+                width: calc(50% - 6px);
+                flex: 0 0 calc(50% - 6px);
+                min-width: 0;
+                padding: 12px 10px;
+                font-size: 13px;
+            }
+            
+            .feedback-button {
+                width: calc(100% - 20px);
+                justify-content: center;
+                margin: 10px auto;
+                padding: 15px 0;
+            }
+            
+            .quick-card-container {
+                grid-template-columns: repeat(2, 1fr);
+            }
+            
+            .weather-card {
+                flex-direction: column;
+                gap: 15px;
+            }
+            
+            .weather-info {
+                width: 100%;
+                justify-content: center;
+            }
+        }
+        
+        /* 更小屏幕的设备 */
+        @media screen and (max-width: 400px) {
+            .quick-card-container {
+                grid-template-columns: 1fr;
+            }
+            
+            .function-buttons {
+                flex-direction: column;
+            }
+            
+            .function-button {
+                width: 100%;
+                flex: 0 0 100%;
+            }
+            
+            .weather-forecast {
+                overflow-x: auto;
+                padding-bottom: 10px;
+                justify-content: flex-start;
+                width: 100%;
+            }
+            
+            .forecast-day {
+                min-width: 70px;
+            }
+            
+            .calendar-layout {
+                flex-direction: column;
+            }
+            
+            .calendar-container, .calendar-summary, .today-info {
+                width: 100%;
+            }
+            
+            .website-links {
+                flex-direction: column;
+            }
+            
+            .website-links a {
+                width: 100%;
+                flex: 0 0 100%;
+            }
+        }
+
+        /* 更新日志展开/收起功能样式 */
+        .update-log-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .toggle-btn {
+            background-color: #e8f4fd;
+            color: #3498db;
+            border: none;
+            border-radius: 6px;
+            padding: 6px 12px;
+            font-size: 14px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            transition: all 0.3s ease;
+        }
+
+        .toggle-btn:hover {
+            background-color: #d1e9fa;
+            transform: translateY(-2px);
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+        }
+
+        .toggle-btn i {
+            transition: transform 0.3s ease;
+        }
+
+        .toggle-btn.expanded i {
+            transform: rotate(180deg);
+        }
+
+        .update-log-content {
+            transition: max-height 0.5s ease;
+            overflow: hidden;
+        }
+
+        .update-log-content.collapsed {
+            max-height: 150px;
+            position: relative;
+        }
+
+        .update-log-content.collapsed::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 50px;
+            background: linear-gradient(to bottom, rgba(255,255,255,0), rgba(255,255,255,1));
+            pointer-events: none;
+        }
+
+        .update-log-content.expanded {
+            max-height: 1000px;
+        }
+    </style>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+</head>
+
+<body>
+    <body data-user-logged-in="false">
+    <!-- 添加Font Awesome CSS -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css" integrity="sha512-1ycn6IcaQQ40/MKBW2W4Rhis/DbILU74C1vSrLJxCq57o941Ym01SwNsOMqvEBFlcgUa6xLiPY/NS5R+E6ztJQ==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+    
+    <nav class="navbar">
+        <div class="user-section">
+            
+            <div class="auth-buttons">
+                <a href="#" class="nav-link" onclick="showLoginModal()">登录</a>
+                <a href="#" class="nav-link" onclick="showRegisterModal()">注册</a>
+            </div>
+            
+        </div>
+
+        <div class="nav-links">
+            <a href="/" class="active">首页</a>
+            <a href="/print" class=""
+                id="printLink" data-requires-login="true">在线打印</a>
+            <a href="/activity" class="">校园活动</a>
+            <a href="/notice" class="">通知公告</a>
+            <a href="/resource" class="">资源分享</a>
+            <a href="/guide" class="">校园指南</a>
+            <a href="/course" class="">课程信息</a>
+            <a href="/food" class="">吃吃吃</a>
+        </div>
+
+        <!-- 登录模态框 -->
+        <div id="loginModal" class="modal">
+            <div class="modal-content auth-modal">
+                <span class="close" onclick="closeModal('loginModal')">&times;</span>
+                <h2><i class="fas fa-sign-in-alt"></i> 用户登录</h2>
+                <form id="loginForm" onsubmit="return handleLogin(event)">
+                    <div class="form-group">
+                        <label for="loginEmail"><i class="fas fa-envelope"></i> 邮箱</label>
+                        <input type="email" id="loginEmail" required placeholder="请输入邮箱">
+                    </div>
+                    <div class="form-group">
+                        <label for="loginPassword"><i class="fas fa-lock"></i> 密码</label>
+                        <div class="password-input-container">
+                            <input type="password" id="loginPassword" required placeholder="请输入密码">
+                            <span class="password-toggle" onclick="togglePasswordVisibility('loginPassword', this)">
+                                <i class="fas fa-eye"></i>
+                            </span>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="captchaCode"><i class="fas fa-shield-alt"></i> 验证码</label>
+                        <div class="captcha-group">
+                            <input type="text" id="captchaCode" required placeholder="请输入验证码">
+                            <img id="captchaImg" src="/captcha" alt="验证码" onclick="refreshCaptcha()">
+                        </div>
+                    </div>
+                    <button type="submit" class="submit-btn"><i class="fas fa-sign-in-alt"></i> 登录</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- 注册模态框 -->
+        <div id="registerModal" class="modal">
+            <div class="modal-content auth-modal">
+                <span class="close" onclick="closeModal('registerModal')">&times;</span>
+                <h2><i class="fas fa-user-plus"></i> 用户注册</h2>
+                <form id="registerForm" onsubmit="return handleRegister(event)">
+                    <div class="form-group">
+                        <label for="registerEmail"><i class="fas fa-envelope"></i> 邮箱</label>
+                        <input type="email" id="registerEmail" required placeholder="请输入邮箱">
+                    </div>
+                    <div class="form-group">
+                        <label for="registerUsername"><i class="fas fa-user"></i> 用户名</label>
+                        <input type="text" id="registerUsername" required placeholder="请输入用户名">
+                    </div>
+                    <div class="form-group">
+                        <label for="registerPassword"><i class="fas fa-lock"></i> 密码</label>
+                        <div class="password-input-container">
+                            <input type="password" id="registerPassword" required placeholder="请输入密码"
+                                oninput="checkPasswordStrength(this.value)">
+                            <span class="password-toggle" onclick="togglePasswordVisibility('registerPassword', this)">
+                                <i class="fas fa-eye"></i>
+                            </span>
+                        </div>
+                        <div class="password-strength">
+                            <div class="strength-bar"></div>
+                            <span class="strength-text">密码强度：弱</span>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="confirmPassword"><i class="fas fa-lock"></i> 确认密码</label>
+                        <div class="password-input-container">
+                            <input type="password" id="confirmPassword" required placeholder="请再次输入密码">
+                            <span class="password-toggle" onclick="togglePasswordVisibility('confirmPassword', this)">
+                                <i class="fas fa-eye"></i>
+                            </span>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="verificationCode"><i class="fas fa-key"></i> 验证码</label>
+                        <div class="code-input-group">
+                            <input type="text" id="verificationCode" required placeholder="请输入验证码">
+                            <button type="button" class="send-code-btn" id="sendCodeBtn"
+                                onclick="sendVerificationCode()">发送验证码</button>
+                        </div>
+                    </div>
+                    <button type="submit" class="submit-btn"><i class="fas fa-user-plus"></i> 注册</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- 修改密码模态框 -->
+        <div id="changePasswordModal" class="modal">
+            <div class="modal-content auth-modal">
+                <span class="close" onclick="closeModal('changePasswordModal')">&times;</span>
+                <h2><i class="fas fa-key"></i> 修改密码</h2>
+                <form id="changePasswordForm" onsubmit="return handleChangePassword(event)">
+                    <div class="form-group">
+                        <label for="oldPassword"><i class="fas fa-lock"></i> 当前密码</label>
+                        <div class="password-input-container">
+                            <input type="password" id="oldPassword" required placeholder="请输入当前密码">
+                            <span class="password-toggle" onclick="togglePasswordVisibility('oldPassword', this)">
+                                <i class="fas fa-eye"></i>
+                            </span>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="newPassword"><i class="fas fa-lock"></i> 新密码</label>
+                        <div class="password-input-container">
+                            <input type="password" id="newPassword" required placeholder="请输入新密码"
+                                oninput="checkPasswordStrength(this.value)">
+                            <span class="password-toggle" onclick="togglePasswordVisibility('newPassword', this)">
+                                <i class="fas fa-eye"></i>
+                            </span>
+                        </div>
+                        <div class="password-strength">
+                            <div class="strength-bar"></div>
+                            <span class="strength-text">密码强度：弱</span>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="confirmNewPassword"><i class="fas fa-lock"></i> 确认新密码</label>
+                        <div class="password-input-container">
+                            <input type="password" id="confirmNewPassword" required placeholder="请再次输入新密码">
+                            <span class="password-toggle" onclick="togglePasswordVisibility('confirmNewPassword', this)">
+                                <i class="fas fa-eye"></i>
+                            </span>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="changePasswordCode"><i class="fas fa-key"></i> 验证码</label>
+                        <div class="code-input-group">
+                            <input type="text" id="changePasswordCode" required placeholder="请输入验证码">
+                            <button type="button" class="send-code-btn" id="sendChangePasswordCodeBtn"
+                                onclick="sendChangePasswordCode()">发送验证码</button>
+                        </div>
+                    </div>
+                    <button type="submit" class="submit-btn"><i class="fas fa-check"></i> 确认修改</button>
+                </form>
+            </div>
+        </div>
+    </nav>
+
+    <script src="/static/js/auth.js"></script>
+</body>
+
+    <div class="main-container">
+        <div class="header">
+            <h1>天赐云校园服务信息平台</h1>
+        </div>
+
+        <div class="content">
+            <!-- 搜索栏 -->
+            <div class="search-container">
+                <i class="fas fa-search search-icon"></i>
+                <input type="text" class="search-bar" placeholder="搜索校园信息、服务、资源...">
+            </div>
+            
+            <!-- 历史搜索 -->
+            <div class="search-history">
+                <div class="search-history-header">
+                    <span class="search-history-title">历史搜索</span>
+                    <button class="clear-history">清空历史</button>
+                </div>
+                <div class="history-items">
+                    <!-- 历史搜索项将动态添加 -->
+                </div>
+            </div>
+            
+            <!-- 天气信息 -->
+            <div class="weather-card">
+                <div class="weather-info">
+                    <i class="fas fa-sun weather-icon"></i>
+                    <div class="weather-temp">加载中...</div>
+                    <div class="weather-details">
+                        <div class="weather-location">正在定位...</div>
+                        <div class="weather-description">正在获取天气数据</div>
+                    </div>
+                </div>
+                <div class="weather-forecast">
+                    <div class="forecast-day">
+                        <div class="forecast-day-name">-</div>
+                        <i class="fas fa-cloud forecast-icon"></i>
+                        <div class="forecast-temp">-</div>
+                    </div>
+                    <div class="forecast-day">
+                        <div class="forecast-day-name">-</div>
+                        <i class="fas fa-cloud-sun forecast-icon"></i>
+                        <div class="forecast-temp">-</div>
+                    </div>
+                    <div class="forecast-day">
+                        <div class="forecast-day-name">-</div>
+                        <i class="fas fa-sun forecast-icon"></i>
+                        <div class="forecast-temp">-</div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 快速功能导航 -->
+            <div class="quick-card-container">
+                <div class="quick-card" onclick="window.location.href='/food'">
+                    <i class="fas fa-utensils"></i>
+                    <h3>校园美食</h3>
+                </div>
+                <div class="quick-card" onclick="window.location.href='/guide'">
+                    <i class="fas fa-map-marked-alt"></i>
+                    <h3>校园指南</h3>
+                </div>
+                <div class="quick-card" onclick="window.location.href='/resource'">
+                    <i class="fas fa-book"></i>
+                    <h3>资源分享</h3>
+                </div>
+                <div class="quick-card" onclick="window.location.href='/activity'">
+                    <i class="fas fa-calendar-alt"></i>
+                    <h3>校园活动</h3>
+                </div>
+                <div class="quick-card" id="scheduleCard">
+                    <i class="fas fa-table"></i>
+                    <h3>我的课表</h3>
+                </div>
+                <div class="quick-card" id="gradesCard">
+                    <i class="fas fa-chart-line"></i>
+                    <h3>成绩查询</h3>
+                </div>
+            </div>
+
+            <!-- 轮播图 -->
+            <div class="carousel">
+		<img src="/static/images/img12.jpg" alt="校园风景12">
+                <img src="/static/images/img1.jpg" alt="校园风景1">
+                <img src="/static/images/img2.jpg" alt="校园风景2">
+                <img src="/static/images/img3.jpg" alt="校园风景3">
+                <img src="/static/images/img4.jpg" alt="校园风景4">
+            </div>
+
+            <!-- 通知公告 -->
+            <div class="info-section">
+                <div class="info-card">
+                    <div class="update-log-header">
+                        <h3>更新日志</h3>
+                        <button id="toggleUpdateLog" class="toggle-btn">
+                            <i class="fas fa-chevron-down"></i>
+                            <span>展开</span>
+                        </button>
+                    </div>
+                    <div id="updateLogContent" class="update-log-content collapsed">
+                        <ul>
+                            <p>5.13 - 3.3版本</p>
+                            <li>    修复了未知bug，安卓端可以正常使用，pc端不能上传的问题</li>
+                            <li>    更改计费标准为页数+大小双重辅助，对于pdf的判断更为精准，对于office文件使用大小不精确判断，推荐使用pdf上传</li>
+                            <li>    增加了更多动画，使用户使用更加美观便利</li>
+                            <p>5.9 - 3.2版本(大版本更新)</p>
+                            <li>    完善用户的"在线打印"功能</li>
+                            <li>    新增，用户余额体系管理，有详细的充值，消费，记录等相关内容，目前仅用于打印</li>
+                            <li>    优化了"在线打印"相关内容的界面友好性，用户可以更加清晰直接的使用功能</li>
+                            <li>    新增充值体系（暂未启用），消费体系，打印定价（目前按照文件大小定价，图片另外定价）</li>
+                            <li>    新增管理员界面中的充值管理部分，可以实时提示（一分钟检查一次），方便管理员得知充值和打印需求</li>
+                            <li>    管理员界面中，管理员可以设置各用户账户余额，以便随时调整交易价格</li>  
+                            <p>5.8 - 3.1版本(大版本更新)</p>
+                            <li>    基本完成打印部分的内核，可供用户上传文件，管理员选择文件并针对文件进行相关打印操作</li>
+                            <li>    新增管理员界面的打印管理部分，管理员可以清晰的处理用户的打印需求以及完成打印操作</li>
+                            <li>    优化界面表现，用户使用更为方便</li> 
+                            <p>5.3 - 3.0版本</p>
+                            <li>    添加打印模板功能，但是并不完善</li>
+                            <li>    修正主在线打印页面内容吗，新增管理员页面打印内容</li>
+                            <p>4.22 - 2.2版本</p>
+                            <li>    修复后台管理界面中"商铺优惠管理"界面中对信息的编辑获取失败的问题（原因为前后端api的信息返回格式不一致） </li>
+                            <li>    优化了后台管理界面中对"商铺新品及优惠信息"的日期处理，当优惠日期失效时，会弹出提示，并且不会在主站中显示 </li>
+                            <li>    优化了用户在未登录状态下时，点击"资源分享"页面中的两个需要登录使用的两个按钮时的窗口显示和跳转问题</li>
+                            <li>    首页中添加了对教务系统的跳转（进入需要学校内网vpn），得知学校教务系统添加了Referer（来源页）字段的相应拦截逻辑来防止跨站请求伪造（CSRF）攻击</li>
+                            <li>    优化了首页的显示：修改轮播图，添加实用跳转</li>
+                            <li>    修复了"吃吃吃"页面的转盘指示逻辑，增加高亮显示</li>
+                            <li>    添加功能模块，为"首页"增加搜索框（可保存历史记录），天气栏(目前只是展示，真正的天气需要服务器备案并申请api)，功能快速标签</li>
+                            <li>    为"资源分享"页面添加了一些实用资源，方便用户使用</li >
+                            <li>    优化"首页"下方导航按钮的颜色搭配和小屏适配，"吃吃吃"页面的"吃什么大转盘"的小屏适配</li >
+                            <p>4.21 - 2.1版本</p>  
+                            <li>   修复用户注册，后台上传资源时，时区不对应的问题（原UTC 现在为UTC+8北京时间） </li>  
+                            <li>   添加功能"商铺优惠管理"，并同步更新主页与管理员界面的相应内容，使之达成可更新的动态页面   </li> 
+                            <li>   增加"美食反馈"按钮，增加用户的互动性，同时帮助管理员运营维护界面 </li>
+                            <li>   更新"校园指南"页面的学分绩点计算逻辑与表现，使其更完善准确 </li>
+                            <li>   更新"校园指南"tab页，使其内容有效可信 </li>
+                            <li>   微调所有html页面的标题，使之更为严谨 </li>
+                            <li>   优化"资源分享""校园活动"的内容显示，使其更好的利用空间资源，视觉效果更佳 </li>       
+                            <li>   优化首页模态框显示样式 </li>
+                            <li>   美化所有"反馈"模态框样式，增加了关闭按钮样式动画，背景模糊等多种细节 </li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 校历专区 -->
+            <div class="calendar-section">
+                <h2>校历专区</h2>
+                <div class="calendar-layout">
+                    <div class="calendar-container">
+                        <div id="calendar"></div>
+                    </div>
+                    <div class="calendar-summary">
+                        <div class="summary-content">
+                            <h3>2024-2025学年校历安排</h3>
+                            <ul>
+                                <li>寒假：1月18日～2月15日，共4周</li>
+                                <li>春季学期：2月16日～6月20日，共18教学周（含考试1周）</li>
+                                <li>校运会（推迟，待定）：4月24日～25日</li>
+                                <li>暑假：6月21日～8月23日，共9周</li>
+                                <li>夏季学期：8月24日～9月20日，共4周</li>
+                                <li>新生报到：9月3日～4日（专接本：9月19日）</li>
+                                <li>军训：9月7日～20日（9月5日、6日新生入学教育）</li>
+                                <li>秋季学期：9月21日～1月23日，共18教学周（含考试1周）</li>
+                            </ul>
+                        </div>
+                    </div>
+                    <div class="today-info">
+                        <h3>今日信息</h3>
+                        <p id="today-date"></p>
+                        <p id="today-events"></p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 校园官网导航 -->
+            <div class="website-section">
+                <h2>校园官网导航</h2>
+                <div class="website-links">
+                    <a href="https://www.nciae.edu.cn/" target="_blank">学校官网</a>
+                    <a href="https://ehall.nciae.edu.cn/index.html#/" rel="noreferrer" target="_blank">教务系统</a>
+                    <a href="https://lib.nciae.edu.cn/" target="_blank">图书馆</a>
+                    <a href="https://www.nciae.edu.cn/zsjy1.htm" target="_blank">招生信息</a>
+                    <a href="https://space.bilibili.com/1419167056?spm_id_from=333.337.0.0" target="_blank">社交平台（哔哩哔哩）</a>
+                    <a href="https://www.douyin.com/user/MS4wLjABAAAA1pR_UtOOOnfR6iniNi25mrdJ17_nA-IIj-mjtyNzECw?from_tab_name=main" target="_blank">社交平台（抖音）</a>
+                    
+                </div>
+                <div class="function-buttons">
+                    <button class="function-button" onclick="alert('功能开发中，敬请期待！')">一键看课表</button>
+                    <button class="function-button" onclick="alert('功能开发中，敬请期待！')">一键查成绩</button>
+                    <button class="feedback-button" id="feedbackBtn">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor"
+                            viewBox="0 0 16 16">
+                            <path
+                                d="M14 1a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H4.414A2 2 0 0 0 3 11.586l-2 2V2a1 1 0 0 1 1-1h12zM2 0a2 2 0 0 0-2 2v12.793a.5.5 0 0 0 .854.353l2.853-2.853A1 1 0 0 1 4.414 12H14a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2H2z" />
+                            <path
+                                d="M3 3.5a.5.5 0 0 1 .5-.5h9a.5.5 0 0 1 0 1h-9a.5.5 0 0 1-.5-.5zM3 6a.5.5 0 0 1 .5-.5h9a.5.5 0 0 1 0 1h-9A.5.5 0 0 1 3 6zm0 2.5a.5.5 0 0 1 .5-.5h5a.5.5 0 0 1 0 1h-5a.5.5 0 0 1-.5-.5z" />
+                        </svg>
+                        意见反馈
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div class="footer">
+        <p>&copy; 2025 天赐云校园服务信息平台. 保留所有权利.</p>
+        <p>北华航天工业学院 专版</p>
+</div>
+    </div>
+
+    <!-- 反馈模态框 -->
+    <div id="feedbackModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeModal('feedbackModal')">&times;</span>
+            <div class="modal-header">
+                <h2 class="modal-title">反馈中心</h2>
+            </div>
+            <div class="modal-content-body">
+                <div id="feedbackTabs">
+                    <button id="viewFeedbackTab" class="btn" onclick="switchFeedbackTab('viewFeedback')">我的反馈</button>
+                    <button id="newFeedbackTab" class="btn" onclick="switchFeedbackTab('newFeedback')">提交反馈</button>
+                </div>
+
+                <div id="viewFeedback" class="feedback-tab-content">
+                    <div id="feedback-container">
+                        <!-- 反馈列表将通过JS动态加载 -->
+                    </div>
+                    <div id="no-feedback" class="no-content" style="display: none;">
+                        <p>您还没有提交过反馈。</p>
+                    </div>
+                </div>
+
+                <div id="newFeedback" class="feedback-tab-content" style="display: none;">
+                    <form id="submitFeedbackForm" class="modal-form">
+                        <div class="form-group">
+                            <label for="feedback-title">标题</label>
+                            <input type="text" id="feedback-title" class="form-control" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="feedback-type">类型</label>
+                            <select id="feedback-type" class="form-control" required>
+                                <option value="">选择类型</option>
+                                <option value="建议">建议</option>
+                                <option value="问题">问题</option>
+                                <option value="错误报告">错误报告</option>
+                                <option value="其他">其他</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="feedback-content">内容</label>
+                            <textarea id="feedback-content" class="form-control" rows="4" required></textarea>
+                        </div>
+                        <div class="btn-row">
+                            <button type="button" class="btn btn-default"
+                                onclick="switchFeedbackTab('viewFeedback')">取消</button>
+                            <button type="submit" class="btn btn-primary">提交反馈</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 登录提示模态框 -->
+    <div id="loginRequiredModal" class="modal">
+        <div class="modal-content auth-modal">
+            <span class="close" onclick="closeModal('loginRequiredModal')">&times;</span>
+            <div class="modal-header">
+                <h2 class="modal-title"><i class="fas fa-lock"></i> 需要登录</h2>
+            </div>
+            <div class="modal-content-body">
+                <p>您需要登录才能使用此功能。</p>
+                <div class="btn-row">
+                    <button type="button" class="btn btn-default" onclick="closeModal('loginRequiredModal')">取消</button>
+                    <button type="button" class="btn btn-primary"
+                        onclick="closeModal('loginRequiredModal'); showLoginModal()">
+                        <i class="fas fa-sign-in-alt"></i> 前往登录
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 轮播图功能
+        const images = document.querySelectorAll('.carousel img');
+        let current = 0;
+
+        function showNextImage() {
+            images[current].classList.remove('active');
+            current = (current + 1) % images.length;
+            images[current].classList.add('active');
+        }
+
+        function startCarousel() {
+            images[0].classList.add('active');
+            setInterval(showNextImage, 5000); // 把间隔时间改回5000，与原来保持一致
+        }
+
+        // 更新日志展开/收起功能
+        document.addEventListener('DOMContentLoaded', function() {
+            // 启动轮播图
+            startCarousel();
+            
+            const toggleBtn = document.getElementById('toggleUpdateLog');
+            const updateLogContent = document.getElementById('updateLogContent');
+            const btnText = toggleBtn.querySelector('span');
+            
+            toggleBtn.addEventListener('click', function() {
+                if (updateLogContent.classList.contains('collapsed')) {
+                    // 展开内容
+                    updateLogContent.classList.remove('collapsed');
+                    updateLogContent.classList.add('expanded');
+                    btnText.textContent = '收起';
+                    toggleBtn.classList.add('expanded');
+                } else {
+                    // 收起内容
+                    updateLogContent.classList.remove('expanded');
+                    updateLogContent.classList.add('collapsed');
+                    btnText.textContent = '展开';
+                    toggleBtn.classList.remove('expanded');
+                }
+            });
+        });
+
+        // 日期格式化辅助函数
+        function formatDate(date) {
+            const options = { year: 'numeric', month: 'long', day: 'numeric' };
+            return date.toLocaleDateString('zh-CN', options);
+        }
+
+        // 日历初始化
+        document.addEventListener('DOMContentLoaded', function () {
+            const calendarEl = document.getElementById('calendar');
+            const calendar = new FullCalendar.Calendar(calendarEl, {
+                initialView: 'dayGridMonth',
+                locale: 'zh-cn',
+                headerToolbar: {
+                    left: 'prev,next today',
+                    center: 'title',
+                    right: 'dayGridMonth'
+                },
+                height: 'auto',
+                contentHeight: 400,
+                dayCellClassNames: function (arg) {
+                    const date = arg.date;
+                    const classes = [];
+
+                    // 添加日期样式
+                    classes.push('fc-date-' + date.getDate());
+
+                    // 添加月份样式
+                    classes.push('fc-month-' + (date.getMonth() + 1));
+
+                    // 添加季度样式
+                    const quarter = Math.floor(date.getMonth() / 3) + 1;
+                    classes.push('fc-quarter-' + quarter);
+
+                    return classes;
+                },
+                dayCellContent: function (arg) {
+                    const dayNumber = arg.dayNumberText;
+                    return {
+                        html: `<div class="fc-date-number">${dayNumber}</div>`
+                    };
+                },
+                events: [
+                    {
+                        title: '元旦',
+                        start: '2025-01-01',
+                        end: '2025-01-01',
+                        color: '#ff0000',
+                        textColor: 'white',
+                        description: '元旦假期',
+                        classNames: ['event-holiday']
+                    },
+                    {
+                        title: '春节',
+                        start: '2025-01-29',
+                        end: '2025-02-04',
+                        color: '#ff0000',
+                        textColor: 'white',
+                        description: '春节假期',
+                        classNames: ['event-holiday']
+                    },
+                    {
+                        title: '清明节',
+                        start: '2025-04-04',
+                        end: '2025-04-06',
+                        color: '#ff0000',
+                        textColor: 'white',
+                        description: '清明节假期',
+                        classNames: ['event-holiday']
+                    },
+                    {
+                        title: '劳动节',
+                        start: '2025-05-01',
+                        end: '2025-05-05',
+                        color: '#ff0000',
+                        textColor: 'white',
+                        description: '劳动节假期',
+                        classNames: ['event-holiday']
+                    },
+                    {
+                        title: '端午节',
+                        start: '2025-05-31',
+                        end: '2025-06-02',
+                        color: '#ff0000',
+                        textColor: 'white',
+                        description: '端午节假期',
+                        classNames: ['event-holiday']
+                    },
+                    {
+                        title: '中秋节',
+                        start: '2025-09-17',
+                        end: '2025-09-19',
+                        color: '#ff0000',
+                        textColor: 'white',
+                        description: '中秋节假期',
+                        classNames: ['event-holiday']
+                    },
+                    {
+                        title: '国庆节',
+                        start: '2025-10-01',
+                        end: '2025-10-07',
+                        color: '#ff0000',
+                        textColor: 'white',
+                        description: '国庆节假期',
+                        classNames: ['event-holiday']
+                    },
+                    {
+                        title: '寒假',
+                        start: '2025-01-18',
+                        end: '2025-02-15',
+                        color: '#4a90e2',
+                        textColor: 'white',
+                        description: '寒假，共4周',
+                        classNames: ['event-winter-vacation']
+                    },
+                    {
+                        title: '春季学期',
+                        start: '2025-02-16',
+                        end: '2025-06-20',
+                        color: '#50c878',
+                        textColor: 'white',
+                        description: '春季学期，共18教学周（含考试1周）',
+                        classNames: ['event-spring-semester']
+                    },
+                    {
+                        title: '校运会',
+                        start: '2025-04-24',
+                        end: '2025-04-25',
+                        color: '#ff6b6b',
+                        textColor: 'white',
+                        description: '校运会（推迟，待定）',
+                        classNames: ['event-sports-meet']
+                    },
+                    {
+                        title: '暑假',
+                        start: '2025-06-21',
+                        end: '2025-08-23',
+                        color: '#ffa500',
+                        textColor: 'white',
+                        description: '暑假，共9周',
+                        classNames: ['event-summer-vacation']
+                    },
+                    {
+                        title: '夏季学期',
+                        start: '2025-08-24',
+                        end: '2025-09-20',
+                        color: '#9370db',
+                        textColor: 'white',
+                        description: '夏季学期，共4周',
+                        classNames: ['event-summer-semester']
+                    },
+                    {
+                        title: '新生报到',
+                        start: '2025-09-03',
+                        end: '2025-09-04',
+                        color: '#ff69b4',
+                        textColor: 'white',
+                        description: '新生报到',
+                        classNames: ['event-new-student']
+                    },
+                    {
+                        title: '专接本报到',
+                        start: '2025-09-19',
+                        end: '2025-09-19',
+                        color: '#ff69b4',
+                        textColor: 'white',
+                        description: '专接本学生报到',
+                        classNames: ['event-new-student']
+                    },
+                    {
+                        title: '新生入学教育',
+                        start: '2025-09-05',
+                        end: '2025-09-06',
+                        color: '#8b4513',
+                        textColor: 'white',
+                        description: '新生入学教育',
+                        classNames: ['event-education']
+                    },
+                    {
+                        title: '军训',
+                        start: '2025-09-07',
+                        end: '2025-09-20',
+                        color: '#8b4513',
+                        textColor: 'white',
+                        description: '军训',
+                        classNames: ['event-military-training']
+                    },
+                    {
+                        title: '秋季学期',
+                        start: '2025-09-21',
+                        end: '2026-01-23',
+                        color: '#ff8c00',
+                        textColor: 'white',
+                        description: '秋季学期，共18教学周（含考试1周）',
+                        classNames: ['event-autumn-semester']
+                    }
+                ],
+                eventClick: function (info) {
+                    const popup = document.createElement('div');
+                    popup.className = 'fc-event-popup';
+                    popup.innerHTML = `
+                        <h3>${info.event.title}</h3>
+                        <p>${info.event.extendedProps.description}</p>
+                        <p>开始时间: ${info.event.start.toLocaleDateString()}</p>
+                        <p>结束时间: ${info.event.end.toLocaleDateString()}</p>
+                        <button class="close-btn">&times;</button>
+                    `;
+                    document.body.appendChild(popup);
+
+                    popup.querySelector('.close-btn').addEventListener('click', function () {
+                        popup.remove();
+                    });
+                },
+                eventDidMount: function (info) {
+                    info.el.title = info.event.extendedProps.description;
+                }
+            });
+            calendar.render();
+
+            // 计算当前周数
+            function getCurrentWeek(startDate, currentDate) {
+                const start = new Date(startDate);
+                const current = new Date(currentDate);
+                const diffTime = Math.abs(current - start);
+                const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                return Math.ceil(diffDays / 7);
+            }
+
+            // 更新今日信息
+            function updateTodayInfo() {
+                const today = new Date();
+                const todayDate = document.getElementById('today-date');
+                const todayEvents = document.getElementById('today-events');
+
+                todayDate.textContent = `今天是：${today.toLocaleDateString('zh-CN', {
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric',
+                    weekday: 'long'
+                })} ${today.toLocaleTimeString('zh-CN', {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                    hour12: false
+                })}`;
+
+                const events = calendar.getEvents();
+                const todayEventsList = events.filter(event => {
+                    const start = new Date(event.start);
+                    const end = new Date(event.end);
+                    return today >= start && today <= end;
+                });
+
+                let eventInfo = '';
+                if (todayEventsList.length > 0) {
+                    todayEventsList.forEach(event => {
+                        const weekNumber = getCurrentWeek(event.start, today);
+                        eventInfo += `${event.title}（第${weekNumber}周）<br>`;
+                    });
+                    todayEvents.innerHTML = '今日事件：<br>' + eventInfo;
+                } else {
+                    todayEvents.textContent = '今日无事件';
+                }
+            }
+
+            // 初始更新
+            updateTodayInfo();
+            // 每秒更新一次时间
+            setInterval(updateTodayInfo, 1000);
+        });
+
+        // 反馈相关功能
+        // 检查登录状态
+        function checkLoginStatus(callback) {
+            fetch('/api/user/status')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.logged_in) {
+                        callback(true, data.username);
+                    } else {
+                        callback(false);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error checking login status:', error);
+                    callback(false);
+                });
+        }
+
+        // 关闭模态框
+        function closeModal(modalId) {
+            document.getElementById(modalId).style.display = 'none';
+            document.body.style.overflow = 'auto';
+        }
+
+        // 点击模态框外部关闭
+        window.onclick = function (event) {
+            if (event.target.className === 'modal') {
+                event.target.style.display = 'none';
+                document.body.style.overflow = 'auto';
+            }
+        };
+
+        // 按ESC键关闭模态框
+        document.addEventListener('keydown', function (event) {
+            if (event.key === 'Escape') {
+                const modals = document.getElementsByClassName('modal');
+                for (let modal of modals) {
+                    if (modal.style.display === 'block') {
+                        modal.style.display = 'none';
+                        document.body.style.overflow = 'auto';
+                    }
+                }
+            }
+        });
+
+        // 反馈按钮点击
+        document.getElementById('feedbackBtn').addEventListener('click', function () {
+            checkLoginStatus(function (isLoggedIn) {
+                if (isLoggedIn) {
+                    loadUserFeedback();
+                    document.getElementById('feedbackModal').style.display = 'block';
+                    document.body.style.overflow = 'hidden';
+                    switchFeedbackTab('viewFeedback'); // 默认显示反馈列表
+                } else {
+                    document.getElementById('loginRequiredModal').style.display = 'block';
+                    document.body.style.overflow = 'hidden';
+                }
+            });
+        });
+
+        // 切换反馈标签
+        function switchFeedbackTab(tabId) {
+            const tabs = ['viewFeedback', 'newFeedback'];
+            tabs.forEach(tab => {
+                document.getElementById(tab).style.display = tab === tabId ? 'block' : 'none';
+                const tabButton = document.getElementById(tab + 'Tab');
+                if (tabButton) {
+                    if (tab === tabId) {
+                        tabButton.classList.add('active');
+                    } else {
+                        tabButton.classList.remove('active');
+                    }
+                }
+            });
+
+            // 初始化时设置默认样式
+            if (tabId === 'viewFeedback') {
+                document.getElementById('viewFeedbackTab').classList.add('active');
+                document.getElementById('newFeedbackTab').classList.remove('active');
+            } else {
+                document.getElementById('newFeedbackTab').classList.add('active');
+                document.getElementById('viewFeedbackTab').classList.remove('active');
+            }
+        }
+
+        // 加载用户反馈
+        function loadUserFeedback() {
+            fetch('/api/feedback')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        displayFeedback(data.data);
+                    } else {
+                        document.getElementById('feedback-container').innerHTML =
+                            '<div class="no-content">加载反馈失败: ' + data.message + '</div>';
+                    }
+                })
+                .catch(error => {
+                    console.error('Error loading feedback:', error);
+                    document.getElementById('feedback-container').innerHTML =
+                        '<div class="no-content">加载请求失败，请稍后再试</div>';
+                });
+        }
+
+        // 显示反馈列表
+        function displayFeedback(feedbackList) {
+            const container = document.getElementById('feedback-container');
+            container.innerHTML = '';
+
+            if (feedbackList.length === 0) {
+                document.getElementById('no-feedback').style.display = 'block';
+                return;
+            }
+
+            document.getElementById('no-feedback').style.display = 'none';
+
+            feedbackList.forEach(feedback => {
+                const statusBadge = feedback.is_processed ?
+                    '<span class="category-badge" style="background-color: #28a745;">已处理</span>' :
+                    '<span class="category-badge" style="background-color: #ffc107; color: #212529;">待处理</span>';
+
+                const adminReply = feedback.admin_reply ?
+                    `<div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #e0e0e0;">
+                        <h4>管理员回复:</h4>
+                        <p>${feedback.admin_reply}</p>
+                    </div>` : '';
+
+                const feedbackCard = document.createElement('div');
+                feedbackCard.className = 'resource-card';
+                feedbackCard.innerHTML = `
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                        <h3>${feedback.title}</h3>
+                        ${statusBadge}
+                    </div>
+                    <p><span class="category-badge">${feedback.type}</span></p>
+                    <p>${feedback.content}</p>
+                    ${adminReply}
+                    <p style="margin-top: 10px; font-size: 12px; opacity: 0.7;">提交时间: ${feedback.created_at}</p>
+                `;
+
+                container.appendChild(feedbackCard);
+            });
+        }
+
+        // 提交反馈
+        document.getElementById('submitFeedbackForm').addEventListener('submit', function (e) {
+            e.preventDefault();
+
+            const title = document.getElementById('feedback-title').value.trim();
+            const type = document.getElementById('feedback-type').value;
+            const content = document.getElementById('feedback-content').value.trim();
+
+            if (!title || !type || !content) {
+                alert('请填写所有必填字段');
+                return;
+            }
+
+            fetch('/api/feedback', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    title: title,
+                    type: type,
+                    content: content
+                }),
+            })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        document.getElementById('submitFeedbackForm').reset();
+                        alert('反馈提交成功');
+                        // 切换到反馈列表标签
+                        switchFeedbackTab('viewFeedback');
+                        // 重新加载反馈列表
+                        loadUserFeedback();
+                    } else {
+                        alert('提交失败: ' + data.message);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('提交请求失败，请稍后再试');
+                });
+        });
+
+        document.getElementById('scheduleCard').addEventListener('click', function() {
+            checkLoginStatus(function(isLoggedIn) {
+                if (isLoggedIn) {
+                    alert('课表功能正在开发中，敬请期待！');
+                } else {
+                    document.getElementById('loginRequiredModal').style.display = 'block';
+                    document.body.style.overflow = 'hidden';
+                }
+            });
+        });
+        
+        document.getElementById('gradesCard').addEventListener('click', function() {
+            checkLoginStatus(function(isLoggedIn) {
+                if (isLoggedIn) {
+                    alert('成绩查询功能正在开发中，敬请期待！');
+                } else {
+                    document.getElementById('loginRequiredModal').style.display = 'block';
+                    document.body.style.overflow = 'hidden';
+                }
+            });
+        });
+        
+        // 天气API集成 - 使用和风天气API
+        async function getWeatherData() {
+            // 和风天气API配置
+            const apiKey = "8aff6dac568f40fe853d5e606b38d111"; // API密钥
+            const geoUrl = "https://geoapi.qweather.com/v2/city/lookup";
+            const weatherUrl = "https://devapi.qweather.com/v7/weather/now";
+            const forecastUrl = "https://devapi.qweather.com/v7/weather/3d";
+            
+            try {
+                // 首先尝试使用地理定位API获取用户位置
+                const position = await new Promise((resolve, reject) => {
+                    if (navigator.geolocation) {
+                        navigator.geolocation.getCurrentPosition(resolve, reject, {
+                            timeout: 10000,
+                            enableHighAccuracy: true
+                        });
+                    } else {
+                        reject(new Error("浏览器不支持地理定位"));
+                    }
+                }).catch(() => {
+                    // 如果用户拒绝位置请求或发生错误，使用默认位置（河北廊坊）
+                    console.log("地理定位失败，使用默认位置");
+                    return null;
+                });
+                
+                let cityId = "101090602"; // 默认河北廊坊
+                let cityName = "河北廊坊";
+                
+                // 如果成功获取到用户位置，则查询对应城市
+                if (position) {
+                    const {latitude, longitude} = position.coords;
+                    const geoResponse = await fetch(`${geoUrl}?location=${longitude},${latitude}&key=${apiKey}`);
+                    const geoData = await geoResponse.json();
+                    
+                    if (geoData.code === "200" && geoData.location && geoData.location.length > 0) {
+                        cityId = geoData.location[0].id;
+                        cityName = geoData.location[0].adm2 + geoData.location[0].name;
+                    }
+                }
+                
+                // 获取实时天气数据
+                const weatherResponse = await fetch(`${weatherUrl}?location=${cityId}&key=${apiKey}`);
+                const weatherData = await weatherResponse.json();
+                
+                // 获取天气预报数据
+                const forecastResponse = await fetch(`${forecastUrl}?location=${cityId}&key=${apiKey}`);
+                const forecastData = await forecastResponse.json();
+                
+                if (weatherData.code === "200" && forecastData.code === "200") {
+                    // 映射天气图标代码到Font Awesome图标
+                    function mapWeatherIcon(iconCode) {
+                        const iconMap = {
+                            '100': 'fa-sun', // 晴
+                            '101': 'fa-cloud-sun', // 多云
+                            '102': 'fa-cloud-sun', // 少云
+                            '103': 'fa-cloud', // 晴间多云
+                            '104': 'fa-cloud', // 阴
+                            '300': 'fa-cloud-rain', // 阵雨
+                            '301': 'fa-cloud-showers-heavy', // 强阵雨
+                            '302': 'fa-cloud-rain', // 雷阵雨
+                            '303': 'fa-bolt', // 强雷阵雨
+                            '304': 'fa-snowflake', // 雷阵雨伴有冰雹
+                            '305': 'fa-cloud-rain', // 小雨
+                            '306': 'fa-cloud-rain', // 中雨
+                            '307': 'fa-cloud-showers-heavy', // 大雨
+                            '308': 'fa-cloud-showers-heavy', // 极端降雨
+                            '309': 'fa-cloud-rain', // 毛毛雨/细雨
+                            '310': 'fa-cloud-rain', // 暴雨
+                            '311': 'fa-cloud-showers-heavy', // 大暴雨
+                            '312': 'fa-cloud-showers-heavy', // 特大暴雨
+                            '313': 'fa-cloud-meatball', // 冻雨
+                            '400': 'fa-snowflake', // 小雪
+                            '401': 'fa-snowflake', // 中雪
+                            '402': 'fa-snowflake', // 大雪
+                            '403': 'fa-snowflake', // 暴雪
+                            '404': 'fa-cloud-meatball', // 雨夹雪
+                            '405': 'fa-snowflake', // 雨雪天气
+                            '406': 'fa-snowflake', // 阵雨夹雪
+                            '407': 'fa-snowflake', // 阵雪
+                            '500': 'fa-smog', // 薄雾
+                            '501': 'fa-smog', // 雾
+                            '502': 'fa-smog', // 霾
+                            '503': 'fa-smog', // 扬沙
+                            '504': 'fa-smog', // 浮尘
+                            '507': 'fa-smog', // 沙尘暴
+                            '508': 'fa-smog', // 强沙尘暴
+                            '509': 'fa-smog', // 浓雾
+                            '510': 'fa-smog', // 强浓雾
+                            '511': 'fa-smog', // 中度霾
+                            '512': 'fa-smog', // 重度霾
+                            '513': 'fa-smog', // 严重霾
+                            '514': 'fa-wind', // 大风
+                            '515': 'fa-wind', // 龙卷风
+                            '900': 'fa-temperature-high', // 热
+                            '901': 'fa-temperature-low', // 冷
+                            '999': 'fa-question' // 未知
+                        };
+                        
+                        return iconMap[iconCode] || 'fa-cloud';
+                    }
+                    
+                    // 获取星期几
+                    function getDayOfWeek(dateStr) {
+                        const date = new Date(dateStr);
+                        const days = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+                        return days[date.getDay()];
+                    }
+                    
+                    // 格式化天气数据
+                    const current = weatherData.now;
+                    const forecast = forecastData.daily.slice(0, 3); // 取未来3天
+                    
+                    return {
+                        current: {
+                            temp: current.temp,
+                            condition: current.text,
+                            humidity: current.humidity,
+                            wind: current.windSpeed,
+                            icon: mapWeatherIcon(current.icon),
+                            location: cityName
+                        },
+                        forecast: forecast.map(day => ({
+                            date: day.fxDate,
+                            day: getDayOfWeek(day.fxDate),
+                            temp: day.tempMax,
+                            tempMin: day.tempMin,
+                            icon: mapWeatherIcon(day.iconDay)
+                        }))
+                    };
+                } else {
+                    throw new Error("天气数据获取失败");
+                }
+            } catch (error) {
+                console.error("获取天气数据错误:", error);
+                // 返回模拟数据作为备份
+                return {
+                    current: {
+                        temp: Math.floor(Math.random() * 10) + 20,
+                        condition: ['晴朗', '多云', '小雨', '阴天'][Math.floor(Math.random() * 4)],
+                        humidity: Math.floor(Math.random() * 30) + 40,
+                        wind: Math.floor(Math.random() * 10) + 1,
+                        icon: ['fa-sun', 'fa-cloud', 'fa-cloud-rain', 'fa-cloud-sun'][Math.floor(Math.random() * 4)],
+                        location: "河北廊坊"
+                    },
+                    forecast: [
+                        {
+                            day: '周三',
+                            temp: Math.floor(Math.random() * 10) + 18,
+                            tempMin: Math.floor(Math.random() * 5) + 12,
+                            icon: 'fa-cloud'
+                        },
+                        {
+                            day: '周四',
+                            temp: Math.floor(Math.random() * 10) + 18,
+                            tempMin: Math.floor(Math.random() * 5) + 12,
+                            icon: 'fa-cloud-sun'
+                        },
+                        {
+                            day: '周五',
+                            temp: Math.floor(Math.random() * 10) + 18,
+                            tempMin: Math.floor(Math.random() * 5) + 12,
+                            icon: 'fa-sun'
+                        }
+                    ]
+                };
+            }
+        }
+        
+        // 更新天气信息
+        async function updateWeather() {
+            // 显示加载状态
+            document.querySelector('.weather-temp').textContent = "加载中...";
+            document.querySelector('.weather-description').textContent = "正在获取天气数据";
+            
+            const weatherData = await getWeatherData();
+            
+            // 更新当前天气
+            document.querySelector('.weather-temp').textContent = weatherData.current.temp + '°C';
+            document.querySelector('.weather-icon').className = 'fas ' + weatherData.current.icon + ' weather-icon';
+            document.querySelector('.weather-location').textContent = weatherData.current.location;
+            document.querySelector('.weather-description').textContent = 
+                weatherData.current.condition + ' | 湿度: ' + weatherData.current.humidity + '% | 风速: ' + weatherData.current.wind + 'km/h';
+            
+            // 更新预报
+            const forecastElements = document.querySelectorAll('.forecast-day');
+            weatherData.forecast.forEach((forecast, index) => {
+                if (forecastElements[index]) {
+                    forecastElements[index].querySelector('.forecast-day-name').textContent = forecast.day;
+                    forecastElements[index].querySelector('.forecast-temp').textContent = forecast.temp + '°C' + (forecast.tempMin ? ('/' + forecast.tempMin + '°C') : '');
+                    forecastElements[index].querySelector('.forecast-icon').className = 'fas ' + forecast.icon + ' forecast-icon';
+                }
+            });
+        }
+        
+        // 初始化天气
+        updateWeather();
+        // 每30分钟更新一次天气
+        setInterval(updateWeather, 1800000);
+        
+        // 搜索功能
+        const searchBar = document.querySelector('.search-bar');
+        const searchHistory = document.querySelector('.search-history');
+        const historyItems = document.querySelector('.history-items');
+        const clearHistoryBtn = document.querySelector('.clear-history');
+        
+        // 从localStorage加载搜索历史
+        function loadSearchHistory() {
+            const history = JSON.parse(localStorage.getItem('searchHistory')) || [];
+            return history;
+        }
+        
+        // 保存搜索历史到localStorage
+        function saveSearchHistory(history) {
+            localStorage.setItem('searchHistory', JSON.stringify(history));
+        }
+        
+        // 添加搜索记录
+        function addSearchToHistory(searchTerm) {
+            let history = loadSearchHistory();
+            
+            // 移除重复项
+            history = history.filter(item => item !== searchTerm);
+            
+            // 添加到开头
+            history.unshift(searchTerm);
+            
+            // 保留最近的10条记录
+            if (history.length > 10) {
+                history = history.slice(0, 10);
+            }
+            
+            saveSearchHistory(history);
+            renderSearchHistory();
+        }
+        
+        // 渲染搜索历史
+        function renderSearchHistory() {
+            const history = loadSearchHistory();
+            
+            // 如果历史为空，隐藏历史面板
+            if (history.length === 0) {
+                searchHistory.classList.remove('show');
+                return;
+            }
+            
+            historyItems.innerHTML = '';
+            history.forEach(term => {
+                const item = document.createElement('div');
+                item.className = 'history-item';
+                item.innerHTML = `<i class="fas fa-history"></i>${term}`;
+                item.addEventListener('click', () => {
+                    performSearch(term);
+                });
+                historyItems.appendChild(item);
+            });
+            
+            searchHistory.classList.add('show');
+        }
+        
+        // 清空搜索历史
+        clearHistoryBtn.addEventListener('click', () => {
+            localStorage.removeItem('searchHistory');
+            renderSearchHistory();
+            searchHistory.classList.remove('show');
+        });
+        
+        // 执行搜索
+        function performSearch(searchTerm) {
+            searchBar.value = searchTerm;
+            
+            // 简单的关键词匹配导航
+            if (searchTerm.includes('食') || searchTerm.includes('吃') || searchTerm.includes('餐')) {
+                window.location.href = '/food';
+            } 
+            else if (searchTerm.includes('资源') || searchTerm.includes('分享') || searchTerm.includes('学习')) {
+                window.location.href = '/resource';
+            } 
+            else if (searchTerm.includes('活动') || searchTerm.includes('参与') || searchTerm.includes('社团')) {
+                window.location.href = '/activity';
+            } 
+            else if (searchTerm.includes('指南') || searchTerm.includes('导航') || searchTerm.includes('地图')) {
+                window.location.href = '/guide';
+            } 
+            else {
+                alert('未找到与 "' + searchTerm + '" 相关的内容，请尝试其他关键词');
+            }
+            
+            // 添加到历史记录
+            addSearchToHistory(searchTerm);
+            
+            // 清空输入框
+            searchBar.value = '';
+        }
+        
+        // 搜索栏按键事件
+        searchBar.addEventListener('keyup', function(e) {
+            if (e.key === 'Enter') {
+                const searchTerm = this.value.trim().toLowerCase();
+                if (searchTerm) {
+                    performSearch(searchTerm);
+                }
+            }
+        });
+        
+        // 搜索栏获得焦点时显示历史记录
+        searchBar.addEventListener('focus', function() {
+            renderSearchHistory();
+        });
+        
+        // 初始化历史搜索
+        renderSearchHistory();
+    </script>
+</body>
+
+</html>

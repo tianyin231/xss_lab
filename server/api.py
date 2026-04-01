@@ -127,15 +127,20 @@ def get_report(job_id: str) -> Response:
     if job is None:
         return jsonify({"error": "not found"}), 404
 
-    pages = (
-        Page.query.filter_by(job_id=job_id).order_by(Page.id.asc()).limit(10_000).all()
-    )
-    findings = (
-        Finding.query.filter_by(job_id=job_id).order_by(Finding.id.asc()).limit(10_000).all()
-    )
-    logs = (
-        Log.query.filter_by(job_id=job_id).order_by(Log.id.asc()).limit(5_000).all()
-    )
+    # 使用聚合查询获取统计信息，避免加载所有数据
+    from sqlalchemy import func
+    pages_count = db.session.query(func.count(Page.id)).filter_by(job_id=job_id).scalar() or 0
+    findings_count = db.session.query(func.count(Finding.id)).filter_by(job_id=job_id).scalar() or 0
+
+    # 只获取最近的页面、发现和日志，减少数据传输
+    pages = Page.query.filter_by(job_id=job_id).order_by(Page.id.desc()).limit(100).all()
+    findings = Finding.query.filter_by(job_id=job_id).order_by(Finding.id.desc()).limit(100).all()
+    logs = Log.query.filter_by(job_id=job_id).order_by(Log.id.desc()).limit(500).all()
+
+    # 反转顺序，使最新的在最后
+    pages.reverse()
+    findings.reverse()
+    logs.reverse()
 
     return jsonify(
         {
@@ -149,11 +154,12 @@ def get_report(job_id: str) -> Response:
                 "finished_at": job.finished_at.isoformat() + "Z" if job.finished_at else None,
             },
             "stats": {
-                "pages": len(pages),
-                "findings": len(findings),
+                "pages": pages_count,
+                "findings": findings_count,
             },
             "pages": [
                 {
+                    "id": p.id,
                     "url": p.url,
                     "status_code": p.status_code,
                     "content_type": p.content_type,
@@ -324,6 +330,7 @@ def analyze_job(job_id: str) -> Response:
             # 保存AI报告到数据库
             ai_report = AIReport(
                 job_id=job_id,
+                page_id=page.id,  # 关联Page表
                 page_url=page.url,
                 summary=analysis["analysis"]["summary"],
                 accuracy=analysis["analysis"]["accuracy"],
@@ -360,6 +367,7 @@ def analyze_job(job_id: str) -> Response:
             # 保存默认AI报告到数据库
             default_ai_report = AIReport(
                 job_id=job_id,
+                page_id=page.id,  # 关联Page表
                 page_url=page.url,
                 summary=default_analysis["analysis"]["summary"],
                 accuracy=default_analysis["analysis"]["accuracy"],
@@ -405,6 +413,25 @@ def get_ai_report(job_id: str) -> Response:
         "full_report": r.full_report,
         "created_at": r.created_at.isoformat() + "Z"
     } for r in reports])
+
+
+@api_bp.get("/pages/<page_id>")
+def get_page_detail(page_id: int) -> Response:
+    """获取页面详细信息，包括HTML源码"""
+    page: Page | None = db.session.get(Page, page_id)
+    if page is None:
+        return jsonify({"error": "not found"}), 404
+    
+    return jsonify({
+        "id": page.id,
+        "job_id": page.job_id,
+        "url": page.url,
+        "status_code": page.status_code,
+        "content_type": page.content_type,
+        "content": page.content,
+        "sha256": page.sha256,
+        "fetched_at": page.fetched_at.isoformat() + "Z"
+    })
 
 
 def _settings_module() -> Any | None:

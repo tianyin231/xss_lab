@@ -25,9 +25,14 @@
           
           // 布局状态
           const sidebarWidth = ref(parseInt(localStorage.getItem('sidebarWidth') || '320'))
-          const logsWidth = ref(parseInt(localStorage.getItem('logsWidth') || '500'))
+          const logsWidth = ref(parseInt(localStorage.getItem('logsWidth') || '300'))
+          const detailWidth = ref(400)
           const isResizingSidebar = ref(false)
           const isResizingLogs = ref(false)
+          const isResizingDetail = ref(false)
+          const isDetailView = ref(false) // 控制是否显示详细视图
+          const selectedFinding = ref(null) // 选中的风险点
+          const selectedPage = ref(null) // 选中的页面
 
           // 展开与模态框状态
           const activeModal = ref(null) // { type: 'finding' | 'page', data: any }
@@ -232,12 +237,70 @@
             document.removeEventListener('mouseup', stopResize)
           }
 
-          function openModal(type, data) {
-            activeModal.value = { type, data }
+          async function openModal(type, data) {
+            if (type === 'page' && data.id) {
+              // 获取页面详细信息，包括HTML源码
+              try {
+                const res = await fetch(`${apiBase.value}/pages/${data.id}`)
+                const pageDetail = await res.json()
+                activeModal.value = { type, data: { ...data, content: pageDetail.content } }
+              } catch (err) {
+                console.error('获取页面详情失败:', err)
+                activeModal.value = { type, data }
+              }
+            } else {
+              activeModal.value = { type, data }
+            }
           }
 
           function closeModal() {
             activeModal.value = null
+          }
+
+          function toggleDetailView() {
+            isDetailView.value = !isDetailView.value
+            if (!isDetailView.value) {
+              selectedFinding.value = null
+              selectedPage.value = null
+            }
+          }
+
+          function selectFinding(finding) {
+            selectedFinding.value = finding
+            selectedPage.value = null
+          }
+
+          function selectPage(page) {
+            selectedPage.value = page
+            selectedFinding.value = null
+          }
+
+          function startResizeDetail(e) {
+            isResizingDetail.value = true
+            document.addEventListener('mousemove', handleResize)
+            document.addEventListener('mouseup', stopResize)
+          }
+
+          function handleResize(e) {
+            if (isResizingSidebar.value) {
+              sidebarWidth.value = e.clientX
+            } else if (isResizingLogs.value) {
+              const rect = document.querySelector('.main').getBoundingClientRect()
+              logsWidth.value = e.clientX - rect.left
+            } else if (isResizingDetail.value) {
+              const rect = document.querySelector('.main').getBoundingClientRect()
+              detailWidth.value = rect.right - e.clientX
+            }
+          }
+
+          function stopResize() {
+            if (isResizingSidebar.value) localStorage.setItem('sidebarWidth', sidebarWidth.value)
+            if (isResizingLogs.value) localStorage.setItem('logsWidth', logsWidth.value)
+            isResizingSidebar.value = false
+            isResizingLogs.value = false
+            isResizingDetail.value = false
+            document.removeEventListener('mousemove', handleResize)
+            document.removeEventListener('mouseup', stopResize)
           }
 
           onMounted(async () => {
@@ -268,10 +331,10 @@
 
           return {
             apiBase, jobs, selectedJobId, selectedJob, logs, report, aiReport, form, creating, analyzing,
-            sidebarWidth, logsWidth, isResizingSidebar, isResizingLogs,
+            sidebarWidth, logsWidth, detailWidth, isResizingSidebar, isResizingLogs, isResizingDetail, isDetailView, selectedFinding, selectedPage,
             activeModal,
             fetchJobs, fetchReport, createJob, stopJob, deleteJob, analyzeJob, fetchAIReport,
-            startResizeSidebar, startResizeLogs, openModal, closeModal
+            startResizeSidebar, startResizeLogs, startResizeDetail, openModal, closeModal, toggleDetailView, selectFinding, selectPage
           }
         },
         template: `
@@ -354,7 +417,8 @@
                 </div>
               </div>
 
-              <div class="grid">
+              <div class="grid" :class="{ 'detail-view': isDetailView }">
+                <!-- 实时日志 -->
                 <section class="panel" :style="{ width: logsWidth + 'px' }">
                   <div class="panelTitle">实时日志</div>
                   <div class="log">
@@ -367,8 +431,14 @@
 
                 <div class="resizer-v" :class="{ active: isResizingLogs }" @mousedown="startResizeLogs"></div>
 
+                <!-- 扫描报告 -->
                 <section class="panel" style="flex: 1">
-                  <div class="panelTitle">扫描报告</div>
+                  <div class="panel-header">
+                    <div class="panelTitle">扫描报告</div>
+                    <button class="btnGhost" @click="toggleDetailView">
+                      {{ isDetailView ? '返回' : '详细视图' }}
+                    </button>
+                  </div>
                   <div v-if="!report" class="muted" style="padding: 20px">暂无</div>
                   <div v-else class="report">
                     <!-- 扫描概览 -->
@@ -392,7 +462,7 @@
 
                     <!-- 发现列表 -->
                     <div class="section">
-                      <div class="sectionTitle">发现列表（点击查看详情）</div>
+                      <div class="sectionTitle">发现列表</div>
                       <div class="tableWrap">
                         <table class="table">
                           <thead>
@@ -403,7 +473,7 @@
                             </tr>
                           </thead>
                           <tbody>
-                            <tr v-for="(f, idx) in report.findings" :key="idx" class="clickable" @click="openModal('finding', f)">
+                            <tr v-for="(f, idx) in report.findings" :key="idx" class="clickable" :class="{ 'selected': selectedFinding && selectedFinding.title === f.title }" @click="isDetailView ? selectFinding(f) : openModal('finding', f)">
                               <td><span class="pill" :class="'sev_' + f.severity">{{ f.severity }}</span></td>
                               <td class="mono">{{ f.kind }}</td>
                               <td>{{ f.title }}</td>
@@ -426,7 +496,7 @@
                             </tr>
                           </thead>
                           <tbody>
-                            <tr v-for="(p, idx) in report.pages.slice(-100)" :key="idx" class="clickable" @click="openModal('page', p)">
+                            <tr v-for="(p, idx) in report.pages.slice(-100)" :key="idx" class="clickable" :class="{ 'selected': selectedPage && selectedPage.url === p.url }" @click="isDetailView ? selectPage(p) : openModal('page', p)">
                               <td class="mono">{{ p.status_code }}</td>
                               <td class="mono">{{ p.content_type }}</td>
                               <td class="mono">{{ p.url }}</td>
@@ -471,6 +541,96 @@
                           </div>
                         </div>
                       </div>
+                    </div>
+                  </div>
+                </section>
+
+                <!-- 详细信息（仅在详细视图中显示） -->
+                <div v-if="isDetailView" class="resizer-v" :class="{ active: isResizingDetail }" @mousedown="startResizeDetail"></div>
+                <section v-if="isDetailView" class="panel" :style="{ width: detailWidth + 'px' }">
+                  <div class="panelTitle">详细信息</div>
+                  <div class="report">
+                    <!-- 风险点详细信息 -->
+                    <div v-if="selectedFinding" class="section">
+                      <div class="sectionTitle">风险点详情</div>
+                      <div class="modal-section">
+                        <div class="modal-label">漏洞标题</div>
+                        <div class="modal-value" style="font-weight: 700; font-size: 16px;">{{ selectedFinding.title }}</div>
+                      </div>
+                      <div class="modal-section">
+                        <div class="modal-label">危险等级</div>
+                        <div class="modal-value">
+                          <span class="pill" :class="'sev_' + selectedFinding.severity">{{ selectedFinding.severity }}</span>
+                        </div>
+                      </div>
+                      <div class="modal-section">
+                        <div class="modal-label">目标 URL</div>
+                        <div class="modal-value mono">{{ selectedFinding.url }}</div>
+                      </div>
+                      <div class="modal-section">
+                        <div class="modal-label">漏洞类型</div>
+                        <div class="modal-value">{{ selectedFinding.kind }}</div>
+                      </div>
+                      <div class="modal-section">
+                        <div class="modal-label">漏洞证据 / 源码片段</div>
+                        <div class="code-block">{{ selectedFinding.evidence }}</div>
+                      </div>
+                      <div class="modal-section">
+                        <div class="modal-label">发现时间</div>
+                        <div class="modal-value">{{ new Date(selectedFinding.created_at).toLocaleString() }}</div>
+                      </div>
+                      <div class="modal-section">
+                        <div class="modal-label">风险分析</div>
+                        <div class="modal-value">
+                          <p>此漏洞位于页面：{{ selectedFinding.url }}</p>
+                          <p>风险类型：{{ selectedFinding.kind }}</p>
+                          <p>严重程度：{{ selectedFinding.severity }}</p>
+                          <p>漏洞证据显示，该页面存在未经过滤的用户输入，可能导致攻击者注入恶意脚本。</p>
+                          <p>建议：对所有用户输入进行严格的过滤和转义，使用安全的编码方式处理输出。</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- 页面详细信息 -->
+                    <div v-else-if="selectedPage" class="section">
+                      <div class="sectionTitle">页面详情</div>
+                      <div class="modal-section">
+                        <div class="modal-label">页面 URL</div>
+                        <div class="modal-value mono" style="font-weight: 700;">{{ selectedPage.url }}</div>
+                      </div>
+                      <div class="modal-section">
+                        <div class="row">
+                          <div class="col">
+                            <div class="modal-label">HTTP 状态码</div>
+                            <div class="modal-value">{{ selectedPage.status_code }}</div>
+                          </div>
+                          <div class="col">
+                            <div class="modal-label">内容类型</div>
+                            <div class="modal-value">{{ selectedPage.content_type }}</div>
+                          </div>
+                        </div>
+                      </div>
+                      <div class="modal-section">
+                        <div class="modal-label">内容 SHA256</div>
+                        <div class="modal-value mono">{{ selectedPage.sha256 }}</div>
+                      </div>
+                      <div class="modal-section">
+                        <div class="modal-label">抓取时间</div>
+                        <div class="modal-value">{{ new Date(selectedPage.fetched_at).toLocaleString() }}</div>
+                      </div>
+                      <div class="modal-section">
+                        <div class="modal-label">页面分析</div>
+                        <div class="modal-value">
+                          <p>页面已成功抓取，状态码：{{ selectedPage.status_code }}</p>
+                          <p>内容类型：{{ selectedPage.content_type }}</p>
+                          <p>该页面已被扫描，可能存在的XSS漏洞已在发现列表中显示。</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- 默认提示 -->
+                    <div v-else class="muted" style="padding: 20px; text-align: center;">
+                      请从左侧列表中选择一个风险点或页面查看详细信息
                     </div>
                   </div>
                 </section>
@@ -540,6 +700,10 @@
                     <div class="modal-section">
                       <div class="modal-label">抓取时间</div>
                       <div class="modal-value">{{ new Date(activeModal.data.fetched_at).toLocaleString() }}</div>
+                    </div>
+                    <div class="modal-section" v-if="activeModal.data.content">
+                      <div class="modal-label">HTML 源码</div>
+                      <div class="code-block">{{ activeModal.data.content }}</div>
                     </div>
                   </template>
                 </div>

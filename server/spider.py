@@ -81,6 +81,11 @@ class DeepSpider(Spider):
         body = response.body or b""
         sha256 = hashlib.sha256(body).hexdigest()
 
+        # 保存HTML源码
+        content = None
+        if "text/html" in content_type.lower():
+            content = _safe_decode(response)
+        
         push_event(
             self.job_id,
             "page",
@@ -88,6 +93,7 @@ class DeepSpider(Spider):
                 "url": response.url,
                 "status_code": int(getattr(response, "status", 0) or 0),
                 "content_type": content_type,
+                "content": content,  # 保存HTML源码
                 "sha256": sha256,
             },
         )

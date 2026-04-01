@@ -1,8 +1,3 @@
-# 加工公共方法，没有也能跑程序
-try:
-    from OneSightPublic.settings import *  # type: ignore
-except Exception:
-    pass
 
 # ============================================================
 # XSSLab - 全局配置

@@ -51,7 +51,7 @@ class JobRunner:
                 return
 
             job.status = JobStatus.running.value
-            job.started_at = datetime.utcnow()
+            job.started_at = datetime.now()
             db.session.commit()
 
             out_queue: mp.Queue = mp.Queue()
@@ -101,7 +101,7 @@ class JobRunner:
         job: Job | None = db.session.get(Job, job_id)
         if job is not None and job.status == JobStatus.running.value:
             job.status = JobStatus.stopped.value
-            job.finished_at = datetime.utcnow()
+            job.finished_at = datetime.now()
             db.session.commit()
             self._bus.publish(job_id, "job", {"status": job.status})
 
@@ -149,6 +149,7 @@ class JobRunner:
             url=str(data.get("url") or ""),
             status_code=int(data.get("status_code") or 0) or None,
             content_type=str(data.get("content_type") or "") or None,
+            content=data.get("content") or None,  # 保存HTML源码
             sha256=str(data.get("sha256") or "") or None,
         )
         db.session.add(page)

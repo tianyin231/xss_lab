@@ -1,0 +1,947 @@
+<html lang="en">
+<head>
+  
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="icon" href="/static/img/favicon.ico">
+  <title>Scrape | Movie</title>
+  
+
+  <link href="/static/css/app.css" type="text/css" rel="stylesheet">
+  
+<link href="/static/css/index.css" type="text/css" rel="stylesheet">
+
+</head>
+<body>
+<div id="app">
+  <div data-v-74e8b908="" class="el-row" id="header">
+    <div data-v-74e8b908="" class="container el-col el-col-18 el-col-offset-3">
+      <div data-v-74e8b908="" class="el-row">
+        <div data-v-74e8b908="" class="logo el-col el-col-4">
+          <a data-v-74e8b908="" href="/" class="router-link-exact-active router-link-active">
+            <img data-v-74e8b908="" src="/static/img/logo.png" class="logo-image">
+            <span data-v-74e8b908="" class="logo-title">Scrape</span>
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+<div data-v-7f856186="" id="index">
+  <div data-v-7f856186="" class="el-row">
+    <div data-v-7f856186="" class="el-col el-col-18 el-col-offset-3">
+      
+      <div data-v-7f856186="" class="el-card item m-t is-hover-shadow">
+        <div class="el-card__body">
+          <div data-v-7f856186="" class="el-row">
+            <div data-v-7f856186="" class="el-col el-col-24 el-col-xs-8 el-col-sm-6 el-col-md-4">
+              <a data-v-7f856186=""
+                 href="/detail/71"
+                 class="">
+                <img
+                    data-v-7f856186=""
+                    src="https://p1.meituan.net/movie/7d1d85610651dbe1c8687781a87d1008184950.jpg@464w_644h_1e_1c"
+                    class="cover">
+              </a>
+            </div>
+            <div data-v-7f856186="" class="p-h el-col el-col-24 el-col-xs-9 el-col-sm-13 el-col-md-16">
+              <a data-v-7f856186="" href="/detail/71" class="name">
+                <h2 data-v-7f856186="" class="m-b-sm">当幸福来敲门 - The Pursuit of Happyness</h2>
+              </a>
+              <div data-v-7f856186="" class="categories">
+                
+                <button data-v-7f856186="" type="button"
+                        class="el-button category el-button--primary el-button--mini">
+                  <span>剧情</span>
+                </button>
+                
+                <button data-v-7f856186="" type="button"
+                        class="el-button category el-button--primary el-button--mini">
+                  <span>家庭</span>
+                </button>
+                
+                <button data-v-7f856186="" type="button"
+                        class="el-button category el-button--primary el-button--mini">
+                  <span>传记</span>
+                </button>
+                
+              </div>
+              <div data-v-7f856186="" class="m-v-sm info">
+                <span data-v-7f856186="">美国</span>
+                <span data-v-7f856186=""> / </span>
+                <span data-v-7f856186="">117 分钟</span>
+              </div>
+              <div data-v-7f856186="" class="m-v-sm info">
+                
+                <span data-v-7f856186="">2008-01-17 上映</span>
+                
+              </div>
+            </div>
+            <div data-v-7f856186="" class="el-col el-col-24 el-col-xs-5 el-col-sm-5 el-col-md-4">
+              <p data-v-7f856186=""
+                 class="score m-t-md m-b-n-sm">
+                8.9</p>
+              <p data-v-7f856186="">
+              <div data-v-7f856186="" role="slider" aria-valuenow="4.75" aria-valuetext="" aria-valuemin="0"
+                   aria-valuemax="5" tabindex="0" class="el-rate">
+                
+                <span class="el-rate__item" style="cursor: auto;"><i
+                    class="el-rate__icon el-icon-star-on" style="color: rgb(247, 186, 42);"></i>
+                </span>
+                
+                <span class="el-rate__item" style="cursor: auto;"><i
+                    class="el-rate__icon el-icon-star-on" style="color: rgb(247, 186, 42);"></i>
+                </span>
+                
+                <span class="el-rate__item" style="cursor: auto;"><i
+                    class="el-rate__icon el-icon-star-on" style="color: rgb(247, 186, 42);"></i>
+                </span>
+                
+                <span class="el-rate__item" style="cursor: auto;"><i
+                    class="el-rate__icon el-icon-star-on" style="color: rgb(247, 186, 42);"></i>
+                </span>
+                
+                <span
+                    class="el-rate__item" style="cursor: auto;"><i class="el-rate__icon el-icon-star-on"
+                                                                   style="color: rgb(239, 242, 247);"><i
+                    class="el-rate__decimal el-icon-star-on"
+                    style="color: rgb(247, 186, 42); width: 45.000000000000014%;"></i></i>
+                </span>
+              </div>
+              </p></div>
+          </div>
+        </div>
+      </div>
+      
+      <div data-v-7f856186="" class="el-card item m-t is-hover-shadow">
+        <div class="el-card__body">
+          <div data-v-7f856186="" class="el-row">
+            <div data-v-7f856186="" class="el-col el-col-24 el-col-xs-8 el-col-sm-6 el-col-md-4">
+              <a data-v-7f856186=""
+                 href="/detail/72"
+                 class="">
+                <img
+                    data-v-7f856186=""
+                    src="https://p0.meituan.net/movie/a08f65e6cb50fab32df5da69ff116f593095363.jpg@464w_644h_1e_1c"
+                    class="cover">
+              </a>
+            </div>
+            <div data-v-7f856186="" class="p-h el-col el-col-24 el-col-xs-9 el-col-sm-13 el-col-md-16">
+              <a data-v-7f856186="" href="/detail/72" class="name">
+                <h2 data-v-7f856186="" class="m-b-sm">幽灵公主 - もののけ姫</h2>
+              </a>
+              <div data-v-7f856186="" class="categories">
+                
+                <button data-v-7f856186="" type="button"
+                        class="el-button category el-button--primary el-button--mini">
+                  <span>动画</span>
+                </button>
+                
+                <button data-v-7f856186="" type="button"
+                        class="el-button category el-button--primary el-button--mini">
+                  <span>奇幻</span>
+                </button>
+                
+                <button data-v-7f856186="" type="button"
+                        class="el-button category el-button--primary el-button--mini">
+                  <span>冒险</span>
+                </button>
+                
+              </div>
+              <div data-v-7f856186="" class="m-v-sm info">
+                <span data-v-7f856186="">日本</span>
+                <span data-v-7f856186=""> / </span>
+                <span data-v-7f856186="">134 分钟</span>
+              </div>
+              <div data-v-7f856186="" class="m-v-sm info">
+                
+                <span data-v-7f856186="">1998-05-01 上映</span>
+                
+              </div>
+            </div>
+            <div data-v-7f856186="" class="el-col el-col-24 el-col-xs-5 el-col-sm-5 el-col-md-4">
+              <p data-v-7f856186=""
+                 class="score m-t-md m-b-n-sm">
+                8.9</p>
+              <p data-v-7f856186="">
+              <div data-v-7f856186="" role="slider" aria-valuenow="4.75" aria-valuetext="" aria-valuemin="0"
+                   aria-valuemax="5" tabindex="0" class="el-rate">
+                
+                <span class="el-rate__item" style="cursor: auto;"><i
+                    class="el-rate__icon el-icon-star-on" style="color: rgb(247, 186, 42);"></i>
+                </span>
+                
+                <span class="el-rate__item" style="cursor: auto;"><i
+                    class="el-rate__icon el-icon-star-on" style="color: rgb(247, 186, 42);"></i>
+                </span>
+                
+                <span class="el-rate__item" style="cursor: auto;"><i
+                    class="el-rate__icon el-icon-star-on" style="color: rgb(247, 186, 42);"></i>
+                </span>
+                
+                <span class="el-rate__item" style="cursor: auto;"><i
+                    class="el-rate__icon el-icon-star-on" style="color: rgb(247, 186, 42);"></i>
+                </span>
+                
+                <span
+                    class="el-rate__item" style="cursor: auto;"><i class="el-rate__icon el-icon-star-on"
+                                                                   style="color: rgb(239, 242, 247);"><i
+                    class="el-rate__decimal el-icon-star-on"
+                    style="color: rgb(247, 186, 42); width: 45.000000000000014%;"></i></i>
+                </span>
+              </div>
+              </p></div>
+          </div>
+        </div>
+      </div>
+      
+      <div data-v-7f856186="" class="el-card item m-t is-hover-shadow">
+        <div class="el-card__body">
+          <div data-v-7f856186="" class="el-row">
+            <div data-v-7f856186="" class="el-col el-col-24 el-col-xs-8 el-col-sm-6 el-col-md-4">
+              <a data-v-7f856186=""
+                 href="/detail/73"
+                 class="">
+                <img
+                    data-v-7f856186=""
+                    src="https://p0.meituan.net/movie/df15efd261060d3094a73ef679888d4f238149.jpg@464w_644h_1e_1c"
+                    class="cover">
+              </a>
+            </div>
+            <div data-v-7f856186="" class="p-h el-col el-col-24 el-col-xs-9 el-col-sm-13 el-col-md-16">
+              <a data-v-7f856186="" href="/detail/73" class="name">
+                <h2 data-v-7f856186="" class="m-b-sm">十二怒汉 - 12 Angry Men</h2>
+              </a>
+              <div data-v-7f856186="" class="categories">
+                
+                <button data-v-7f856186="" type="button"
+                        class="el-button category el-button--primary el-button--mini">
+                  <span>剧情</span>
+                </button>
+                
+              </div>
+              <div data-v-7f856186="" class="m-v-sm info">
+                <span data-v-7f856186="">美国</span>
+                <span data-v-7f856186=""> / </span>
+                <span data-v-7f856186="">96 分钟</span>
+              </div>
+              <div data-v-7f856186="" class="m-v-sm info">
+                
+                <span data-v-7f856186="">1957-04-13 上映</span>
+                
+              </div>
+            </div>
+            <div data-v-7f856186="" class="el-col el-col-24 el-col-xs-5 el-col-sm-5 el-col-md-4">
+              <p data-v-7f856186=""
+                 class="score m-t-md m-b-n-sm">
+                8.9</p>
+              <p data-v-7f856186="">
+              <div data-v-7f856186="" role="slider" aria-valuenow="4.75" aria-valuetext="" aria-valuemin="0"
+                   aria-valuemax="5" tabindex="0" class="el-rate">
+                
+                <span class="el-rate__item" style="cursor: auto;"><i
+                    class="el-rate__icon el-icon-star-on" style="color: rgb(247, 186, 42);"></i>
+                </span>
+                
+                <span class="el-rate__item" style="cursor: auto;"><i
+                    class="el-rate__icon el-icon-star-on" style="color: rgb(247, 186, 42);"></i>
+                </span>
+                
+                <span class="el-rate__item" style="cursor: auto;"><i
+                    class="el-rate__icon el-icon-star-on" style="color: rgb(247, 186, 42);"></i>
+                </span>
+                
+                <span class="el-rate__item" style="cursor: auto;"><i
+                    class="el-rate__icon el-icon-star-on" style="color: rgb(247, 186, 42);"></i>
+                </span>
+                
+                <span
+                    class="el-rate__item" style="cursor: auto;"><i class="el-rate__icon el-icon-star-on"
+                                                                   style="color: rgb(239, 242, 247);"><i
+                    class="el-rate__decimal el-icon-star-on"
+                    style="color: rgb(247, 186, 42); width: 45.000000000000014%;"></i></i>
+                </span>
+              </div>
+              </p></div>
+          </div>
+        </div>
+      </div>
+      
+      <div data-v-7f856186="" class="el-card item m-t is-hover-shadow">
+        <div class="el-card__body">
+          <div data-v-7f856186="" class="el-row">
+            <div data-v-7f856186="" class="el-col el-col-24 el-col-xs-8 el-col-sm-6 el-col-md-4">
+              <a data-v-7f856186=""
+                 href="/detail/74"
+                 class="">
+                <img
+                    data-v-7f856186=""
+                    src="https://p0.meituan.net/movie/b3defc07dfaa1b6f5b74852ce38a3f8f242792.jpg@464w_644h_1e_1c"
+                    class="cover">
+              </a>
+            </div>
+            <div data-v-7f856186="" class="p-h el-col el-col-24 el-col-xs-9 el-col-sm-13 el-col-md-16">
+              <a data-v-7f856186="" href="/detail/74" class="name">
+                <h2 data-v-7f856186="" class="m-b-sm">搏击俱乐部 - Fight Club</h2>
+              </a>
+              <div data-v-7f856186="" class="categories">
+                
+                <button data-v-7f856186="" type="button"
+                        class="el-button category el-button--primary el-button--mini">
+                  <span>剧情</span>
+                </button>
+                
+                <button data-v-7f856186="" type="button"
+                        class="el-button category el-button--primary el-button--mini">
+                  <span>动作</span>
+                </button>
+                
+                <button data-v-7f856186="" type="button"
+                        class="el-button category el-button--primary el-button--mini">
+                  <span>悬疑</span>
+                </button>
+                
+                <button data-v-7f856186="" type="button"
+                        class="el-button category el-button--primary el-button--mini">
+                  <span>惊悚</span>
+                </button>
+                
+              </div>
+              <div data-v-7f856186="" class="m-v-sm info">
+                <span data-v-7f856186="">美国、德国</span>
+                <span data-v-7f856186=""> / </span>
+                <span data-v-7f856186="">139 分钟</span>
+              </div>
+              <div data-v-7f856186="" class="m-v-sm info">
+                
+                <span data-v-7f856186="">1999-09-10 上映</span>
+                
+              </div>
+            </div>
+            <div data-v-7f856186="" class="el-col el-col-24 el-col-xs-5 el-col-sm-5 el-col-md-4">
+              <p data-v-7f856186=""
+                 class="score m-t-md m-b-n-sm">
+                8.9</p>
+              <p data-v-7f856186="">
+              <div data-v-7f856186="" role="slider" aria-valuenow="4.75" aria-valuetext="" aria-valuemin="0"
+                   aria-valuemax="5" tabindex="0" class="el-rate">
+                
+                <span class="el-rate__item" style="cursor: auto;"><i
+                    class="el-rate__icon el-icon-star-on" style="color: rgb(247, 186, 42);"></i>
+                </span>
+                
+                <span class="el-rate__item" style="cursor: auto;"><i
+                    class="el-rate__icon el-icon-star-on" style="color: rgb(247, 186, 42);"></i>
+                </span>
+                
+                <span class="el-rate__item" style="cursor: auto;"><i
+                    class="el-rate__icon el-icon-star-on" style="color: rgb(247, 186, 42);"></i>
+                </span>
+                
+                <span class="el-rate__item" style="cursor: auto;"><i
+                    class="el-rate__icon el-icon-star-on" style="color: rgb(247, 186, 42);"></i>
+                </span>
+                
+                <span
+                    class="el-rate__item" style="cursor: auto;"><i class="el-rate__icon el-icon-star-on"
+                                                                   style="color: rgb(239, 242, 247);"><i
+                    class="el-rate__decimal el-icon-star-on"
+                    style="color: rgb(247, 186, 42); width: 45.000000000000014%;"></i></i>
+                </span>
+              </div>
+              </p></div>
+          </div>
+        </div>
+      </div>
+      
+      <div data-v-7f856186="" class="el-card item m-t is-hover-shadow">
+        <div class="el-card__body">
+          <div data-v-7f856186="" class="el-row">
+            <div data-v-7f856186="" class="el-col el-col-24 el-col-xs-8 el-col-sm-6 el-col-md-4">
+              <a data-v-7f856186=""
+                 href="/detail/75"
+                 class="">
+                <img
+                    data-v-7f856186=""
+                    src="https://p1.meituan.net/movie/bc022b86345c643ca21d759166f77a553679589.jpg@464w_644h_1e_1c"
+                    class="cover">
+              </a>
+            </div>
+            <div data-v-7f856186="" class="p-h el-col el-col-24 el-col-xs-9 el-col-sm-13 el-col-md-16">
+              <a data-v-7f856186="" href="/detail/75" class="name">
+                <h2 data-v-7f856186="" class="m-b-sm">疯狂原始人 - The Croods</h2>
+              </a>
+              <div data-v-7f856186="" class="categories">
+                
+                <button data-v-7f856186="" type="button"
+                        class="el-button category el-button--primary el-button--mini">
+                  <span>喜剧</span>
+                </button>
+                
+                <button data-v-7f856186="" type="button"
+                        class="el-button category el-button--primary el-button--mini">
+                  <span>动画</span>
+                </button>
+                
+                <button data-v-7f856186="" type="button"
+                        class="el-button category el-button--primary el-button--mini">
+                  <span>冒险</span>
+                </button>
+                
+              </div>
+              <div data-v-7f856186="" class="m-v-sm info">
+                <span data-v-7f856186="">美国</span>
+                <span data-v-7f856186=""> / </span>
+                <span data-v-7f856186="">98 分钟</span>
+              </div>
+              <div data-v-7f856186="" class="m-v-sm info">
+                
+                <span data-v-7f856186="">2013-04-20 上映</span>
+                
+              </div>
+            </div>
+            <div data-v-7f856186="" class="el-col el-col-24 el-col-xs-5 el-col-sm-5 el-col-md-4">
+              <p data-v-7f856186=""
+                 class="score m-t-md m-b-n-sm">
+                8.9</p>
+              <p data-v-7f856186="">
+              <div data-v-7f856186="" role="slider" aria-valuenow="4.75" aria-valuetext="" aria-valuemin="0"
+                   aria-valuemax="5" tabindex="0" class="el-rate">
+                
+                <span class="el-rate__item" style="cursor: auto;"><i
+                    class="el-rate__icon el-icon-star-on" style="color: rgb(247, 186, 42);"></i>
+                </span>
+                
+                <span class="el-rate__item" style="cursor: auto;"><i
+                    class="el-rate__icon el-icon-star-on" style="color: rgb(247, 186, 42);"></i>
+                </span>
+                
+                <span class="el-rate__item" style="cursor: auto;"><i
+                    class="el-rate__icon el-icon-star-on" style="color: rgb(247, 186, 42);"></i>
+                </span>
+                
+                <span class="el-rate__item" style="cursor: auto;"><i
+                    class="el-rate__icon el-icon-star-on" style="color: rgb(247, 186, 42);"></i>
+                </span>
+                
+                <span
+                    class="el-rate__item" style="cursor: auto;"><i class="el-rate__icon el-icon-star-on"
+                                                                   style="color: rgb(239, 242, 247);"><i
+                    class="el-rate__decimal el-icon-star-on"
+                    style="color: rgb(247, 186, 42); width: 45.000000000000014%;"></i></i>
+                </span>
+              </div>
+              </p></div>
+          </div>
+        </div>
+      </div>
+      
+      <div data-v-7f856186="" class="el-card item m-t is-hover-shadow">
+        <div class="el-card__body">
+          <div data-v-7f856186="" class="el-row">
+            <div data-v-7f856186="" class="el-col el-col-24 el-col-xs-8 el-col-sm-6 el-col-md-4">
+              <a data-v-7f856186=""
+                 href="/detail/76"
+                 class="">
+                <img
+                    data-v-7f856186=""
+                    src="https://p1.meituan.net/movie/e540384dc6c9f63bdb27cc554588a77f44305.jpg@464w_644h_1e_1c"
+                    class="cover">
+              </a>
+            </div>
+            <div data-v-7f856186="" class="p-h el-col el-col-24 el-col-xs-9 el-col-sm-13 el-col-md-16">
+              <a data-v-7f856186="" href="/detail/76" class="name">
+                <h2 data-v-7f856186="" class="m-b-sm">阿凡达 - Avatar</h2>
+              </a>
+              <div data-v-7f856186="" class="categories">
+                
+                <button data-v-7f856186="" type="button"
+                        class="el-button category el-button--primary el-button--mini">
+                  <span>动作</span>
+                </button>
+                
+                <button data-v-7f856186="" type="button"
+                        class="el-button category el-button--primary el-button--mini">
+                  <span>科幻</span>
+                </button>
+                
+                <button data-v-7f856186="" type="button"
+                        class="el-button category el-button--primary el-button--mini">
+                  <span>冒险</span>
+                </button>
+                
+              </div>
+              <div data-v-7f856186="" class="m-v-sm info">
+                <span data-v-7f856186="">美国、英国</span>
+                <span data-v-7f856186=""> / </span>
+                <span data-v-7f856186="">162 分钟</span>
+              </div>
+              <div data-v-7f856186="" class="m-v-sm info">
+                
+                <span data-v-7f856186="">2010-01-04 上映</span>
+                
+              </div>
+            </div>
+            <div data-v-7f856186="" class="el-col el-col-24 el-col-xs-5 el-col-sm-5 el-col-md-4">
+              <p data-v-7f856186=""
+                 class="score m-t-md m-b-n-sm">
+                8.9</p>
+              <p data-v-7f856186="">
+              <div data-v-7f856186="" role="slider" aria-valuenow="4.75" aria-valuetext="" aria-valuemin="0"
+                   aria-valuemax="5" tabindex="0" class="el-rate">
+                
+                <span class="el-rate__item" style="cursor: auto;"><i
+                    class="el-rate__icon el-icon-star-on" style="color: rgb(247, 186, 42);"></i>
+                </span>
+                
+                <span class="el-rate__item" style="cursor: auto;"><i
+                    class="el-rate__icon el-icon-star-on" style="color: rgb(247, 186, 42);"></i>
+                </span>
+                
+                <span class="el-rate__item" style="cursor: auto;"><i
+                    class="el-rate__icon el-icon-star-on" style="color: rgb(247, 186, 42);"></i>
+                </span>
+                
+                <span class="el-rate__item" style="cursor: auto;"><i
+                    class="el-rate__icon el-icon-star-on" style="color: rgb(247, 186, 42);"></i>
+                </span>
+                
+                <span
+                    class="el-rate__item" style="cursor: auto;"><i class="el-rate__icon el-icon-star-on"
+                                                                   style="color: rgb(239, 242, 247);"><i
+                    class="el-rate__decimal el-icon-star-on"
+                    style="color: rgb(247, 186, 42); width: 45.000000000000014%;"></i></i>
+                </span>
+              </div>
+              </p></div>
+          </div>
+        </div>
+      </div>
+      
+      <div data-v-7f856186="" class="el-card item m-t is-hover-shadow">
+        <div class="el-card__body">
+          <div data-v-7f856186="" class="el-row">
+            <div data-v-7f856186="" class="el-col el-col-24 el-col-xs-8 el-col-sm-6 el-col-md-4">
+              <a data-v-7f856186=""
+                 href="/detail/77"
+                 class="">
+                <img
+                    data-v-7f856186=""
+                    src="https://p0.meituan.net/movie/0127b451d5b8f0679c6f81c8ed414bb2432442.jpg@464w_644h_1e_1c"
+                    class="cover">
+              </a>
+            </div>
+            <div data-v-7f856186="" class="p-h el-col el-col-24 el-col-xs-9 el-col-sm-13 el-col-md-16">
+              <a data-v-7f856186="" href="/detail/77" class="name">
+                <h2 data-v-7f856186="" class="m-b-sm">哈尔的移动城堡 - ハウルの動く城</h2>
+              </a>
+              <div data-v-7f856186="" class="categories">
+                
+                <button data-v-7f856186="" type="button"
+                        class="el-button category el-button--primary el-button--mini">
+                  <span>动画</span>
+                </button>
+                
+                <button data-v-7f856186="" type="button"
+                        class="el-button category el-button--primary el-button--mini">
+                  <span>奇幻</span>
+                </button>
+                
+                <button data-v-7f856186="" type="button"
+                        class="el-button category el-button--primary el-button--mini">
+                  <span>冒险</span>
+                </button>
+                
+              </div>
+              <div data-v-7f856186="" class="m-v-sm info">
+                <span data-v-7f856186="">日本</span>
+                <span data-v-7f856186=""> / </span>
+                <span data-v-7f856186="">119 分钟</span>
+              </div>
+              <div data-v-7f856186="" class="m-v-sm info">
+                
+                <span data-v-7f856186="">2004-09-05 上映</span>
+                
+              </div>
+            </div>
+            <div data-v-7f856186="" class="el-col el-col-24 el-col-xs-5 el-col-sm-5 el-col-md-4">
+              <p data-v-7f856186=""
+                 class="score m-t-md m-b-n-sm">
+                8.9</p>
+              <p data-v-7f856186="">
+              <div data-v-7f856186="" role="slider" aria-valuenow="4.75" aria-valuetext="" aria-valuemin="0"
+                   aria-valuemax="5" tabindex="0" class="el-rate">
+                
+                <span class="el-rate__item" style="cursor: auto;"><i
+                    class="el-rate__icon el-icon-star-on" style="color: rgb(247, 186, 42);"></i>
+                </span>
+                
+                <span class="el-rate__item" style="cursor: auto;"><i
+                    class="el-rate__icon el-icon-star-on" style="color: rgb(247, 186, 42);"></i>
+                </span>
+                
+                <span class="el-rate__item" style="cursor: auto;"><i
+                    class="el-rate__icon el-icon-star-on" style="color: rgb(247, 186, 42);"></i>
+                </span>
+                
+                <span class="el-rate__item" style="cursor: auto;"><i
+                    class="el-rate__icon el-icon-star-on" style="color: rgb(247, 186, 42);"></i>
+                </span>
+                
+                <span
+                    class="el-rate__item" style="cursor: auto;"><i class="el-rate__icon el-icon-star-on"
+                                                                   style="color: rgb(239, 242, 247);"><i
+                    class="el-rate__decimal el-icon-star-on"
+                    style="color: rgb(247, 186, 42); width: 45.000000000000014%;"></i></i>
+                </span>
+              </div>
+              </p></div>
+          </div>
+        </div>
+      </div>
+      
+      <div data-v-7f856186="" class="el-card item m-t is-hover-shadow">
+        <div class="el-card__body">
+          <div data-v-7f856186="" class="el-row">
+            <div data-v-7f856186="" class="el-col el-col-24 el-col-xs-8 el-col-sm-6 el-col-md-4">
+              <a data-v-7f856186=""
+                 href="/detail/78"
+                 class="">
+                <img
+                    data-v-7f856186=""
+                    src="https://p1.meituan.net/movie/d40efe1183f29d5900f5c60be3c8a89d339225.jpg@464w_644h_1e_1c"
+                    class="cover">
+              </a>
+            </div>
+            <div data-v-7f856186="" class="p-h el-col el-col-24 el-col-xs-9 el-col-sm-13 el-col-md-16">
+              <a data-v-7f856186="" href="/detail/78" class="name">
+                <h2 data-v-7f856186="" class="m-b-sm">盗梦空间 - Inception</h2>
+              </a>
+              <div data-v-7f856186="" class="categories">
+                
+                <button data-v-7f856186="" type="button"
+                        class="el-button category el-button--primary el-button--mini">
+                  <span>剧情</span>
+                </button>
+                
+                <button data-v-7f856186="" type="button"
+                        class="el-button category el-button--primary el-button--mini">
+                  <span>科幻</span>
+                </button>
+                
+                <button data-v-7f856186="" type="button"
+                        class="el-button category el-button--primary el-button--mini">
+                  <span>悬疑</span>
+                </button>
+                
+                <button data-v-7f856186="" type="button"
+                        class="el-button category el-button--primary el-button--mini">
+                  <span>冒险</span>
+                </button>
+                
+              </div>
+              <div data-v-7f856186="" class="m-v-sm info">
+                <span data-v-7f856186="">美国、英国</span>
+                <span data-v-7f856186=""> / </span>
+                <span data-v-7f856186="">148 分钟</span>
+              </div>
+              <div data-v-7f856186="" class="m-v-sm info">
+                
+                <span data-v-7f856186="">2010-09-01 上映</span>
+                
+              </div>
+            </div>
+            <div data-v-7f856186="" class="el-col el-col-24 el-col-xs-5 el-col-sm-5 el-col-md-4">
+              <p data-v-7f856186=""
+                 class="score m-t-md m-b-n-sm">
+                8.9</p>
+              <p data-v-7f856186="">
+              <div data-v-7f856186="" role="slider" aria-valuenow="4.75" aria-valuetext="" aria-valuemin="0"
+                   aria-valuemax="5" tabindex="0" class="el-rate">
+                
+                <span class="el-rate__item" style="cursor: auto;"><i
+                    class="el-rate__icon el-icon-star-on" style="color: rgb(247, 186, 42);"></i>
+                </span>
+                
+                <span class="el-rate__item" style="cursor: auto;"><i
+                    class="el-rate__icon el-icon-star-on" style="color: rgb(247, 186, 42);"></i>
+                </span>
+                
+                <span class="el-rate__item" style="cursor: auto;"><i
+                    class="el-rate__icon el-icon-star-on" style="color: rgb(247, 186, 42);"></i>
+                </span>
+                
+                <span class="el-rate__item" style="cursor: auto;"><i
+                    class="el-rate__icon el-icon-star-on" style="color: rgb(247, 186, 42);"></i>
+                </span>
+                
+                <span
+                    class="el-rate__item" style="cursor: auto;"><i class="el-rate__icon el-icon-star-on"
+                                                                   style="color: rgb(239, 242, 247);"><i
+                    class="el-rate__decimal el-icon-star-on"
+                    style="color: rgb(247, 186, 42); width: 45.000000000000014%;"></i></i>
+                </span>
+              </div>
+              </p></div>
+          </div>
+        </div>
+      </div>
+      
+      <div data-v-7f856186="" class="el-card item m-t is-hover-shadow">
+        <div class="el-card__body">
+          <div data-v-7f856186="" class="el-row">
+            <div data-v-7f856186="" class="el-col el-col-24 el-col-xs-8 el-col-sm-6 el-col-md-4">
+              <a data-v-7f856186=""
+                 href="/detail/79"
+                 class="">
+                <img
+                    data-v-7f856186=""
+                    src="https://p0.meituan.net/movie/5f0a709378d6b567807aa9685610f818282136.jpg@464w_644h_1e_1c"
+                    class="cover">
+              </a>
+            </div>
+            <div data-v-7f856186="" class="p-h el-col el-col-24 el-col-xs-9 el-col-sm-13 el-col-md-16">
+              <a data-v-7f856186="" href="/detail/79" class="name">
+                <h2 data-v-7f856186="" class="m-b-sm">忠犬八公的故事 - Hachi: A Dog&#x27;s Tale</h2>
+              </a>
+              <div data-v-7f856186="" class="categories">
+                
+                <button data-v-7f856186="" type="button"
+                        class="el-button category el-button--primary el-button--mini">
+                  <span>剧情</span>
+                </button>
+                
+              </div>
+              <div data-v-7f856186="" class="m-v-sm info">
+                <span data-v-7f856186="">美国、英国</span>
+                <span data-v-7f856186=""> / </span>
+                <span data-v-7f856186="">93 分钟</span>
+              </div>
+              <div data-v-7f856186="" class="m-v-sm info">
+                
+                <span data-v-7f856186="">2009-06-13 上映</span>
+                
+              </div>
+            </div>
+            <div data-v-7f856186="" class="el-col el-col-24 el-col-xs-5 el-col-sm-5 el-col-md-4">
+              <p data-v-7f856186=""
+                 class="score m-t-md m-b-n-sm">
+                8.9</p>
+              <p data-v-7f856186="">
+              <div data-v-7f856186="" role="slider" aria-valuenow="4.75" aria-valuetext="" aria-valuemin="0"
+                   aria-valuemax="5" tabindex="0" class="el-rate">
+                
+                <span class="el-rate__item" style="cursor: auto;"><i
+                    class="el-rate__icon el-icon-star-on" style="color: rgb(247, 186, 42);"></i>
+                </span>
+                
+                <span class="el-rate__item" style="cursor: auto;"><i
+                    class="el-rate__icon el-icon-star-on" style="color: rgb(247, 186, 42);"></i>
+                </span>
+                
+                <span class="el-rate__item" style="cursor: auto;"><i
+                    class="el-rate__icon el-icon-star-on" style="color: rgb(247, 186, 42);"></i>
+                </span>
+                
+                <span class="el-rate__item" style="cursor: auto;"><i
+                    class="el-rate__icon el-icon-star-on" style="color: rgb(247, 186, 42);"></i>
+                </span>
+                
+                <span
+                    class="el-rate__item" style="cursor: auto;"><i class="el-rate__icon el-icon-star-on"
+                                                                   style="color: rgb(239, 242, 247);"><i
+                    class="el-rate__decimal el-icon-star-on"
+                    style="color: rgb(247, 186, 42); width: 45.000000000000014%;"></i></i>
+                </span>
+              </div>
+              </p></div>
+          </div>
+        </div>
+      </div>
+      
+      <div data-v-7f856186="" class="el-card item m-t is-hover-shadow">
+        <div class="el-card__body">
+          <div data-v-7f856186="" class="el-row">
+            <div data-v-7f856186="" class="el-col el-col-24 el-col-xs-8 el-col-sm-6 el-col-md-4">
+              <a data-v-7f856186=""
+                 href="/detail/80"
+                 class="">
+                <img
+                    data-v-7f856186=""
+                    src="https://p1.meituan.net/movie/a2a287c77415dc1f85b04d288f7d63ab1089754.jpg@464w_644h_1e_1c"
+                    class="cover">
+              </a>
+            </div>
+            <div data-v-7f856186="" class="p-h el-col el-col-24 el-col-xs-9 el-col-sm-13 el-col-md-16">
+              <a data-v-7f856186="" href="/detail/80" class="name">
+                <h2 data-v-7f856186="" class="m-b-sm">拯救大兵瑞恩 - Saving Private Ryan</h2>
+              </a>
+              <div data-v-7f856186="" class="categories">
+                
+                <button data-v-7f856186="" type="button"
+                        class="el-button category el-button--primary el-button--mini">
+                  <span>剧情</span>
+                </button>
+                
+                <button data-v-7f856186="" type="button"
+                        class="el-button category el-button--primary el-button--mini">
+                  <span>历史</span>
+                </button>
+                
+                <button data-v-7f856186="" type="button"
+                        class="el-button category el-button--primary el-button--mini">
+                  <span>战争</span>
+                </button>
+                
+              </div>
+              <div data-v-7f856186="" class="m-v-sm info">
+                <span data-v-7f856186="">美国</span>
+                <span data-v-7f856186=""> / </span>
+                <span data-v-7f856186="">169 分钟</span>
+              </div>
+              <div data-v-7f856186="" class="m-v-sm info">
+                
+                <span data-v-7f856186="">1998-11-13 上映</span>
+                
+              </div>
+            </div>
+            <div data-v-7f856186="" class="el-col el-col-24 el-col-xs-5 el-col-sm-5 el-col-md-4">
+              <p data-v-7f856186=""
+                 class="score m-t-md m-b-n-sm">
+                8.9</p>
+              <p data-v-7f856186="">
+              <div data-v-7f856186="" role="slider" aria-valuenow="4.75" aria-valuetext="" aria-valuemin="0"
+                   aria-valuemax="5" tabindex="0" class="el-rate">
+                
+                <span class="el-rate__item" style="cursor: auto;"><i
+                    class="el-rate__icon el-icon-star-on" style="color: rgb(247, 186, 42);"></i>
+                </span>
+                
+                <span class="el-rate__item" style="cursor: auto;"><i
+                    class="el-rate__icon el-icon-star-on" style="color: rgb(247, 186, 42);"></i>
+                </span>
+                
+                <span class="el-rate__item" style="cursor: auto;"><i
+                    class="el-rate__icon el-icon-star-on" style="color: rgb(247, 186, 42);"></i>
+                </span>
+                
+                <span class="el-rate__item" style="cursor: auto;"><i
+                    class="el-rate__icon el-icon-star-on" style="color: rgb(247, 186, 42);"></i>
+                </span>
+                
+                <span
+                    class="el-rate__item" style="cursor: auto;"><i class="el-rate__icon el-icon-star-on"
+                                                                   style="color: rgb(239, 242, 247);"><i
+                    class="el-rate__decimal el-icon-star-on"
+                    style="color: rgb(247, 186, 42); width: 45.000000000000014%;"></i></i>
+                </span>
+              </div>
+              </p></div>
+          </div>
+        </div>
+      </div>
+      
+    </div>
+    <div class="el-loading-mask" style="display: none;">
+      <div class="el-loading-spinner">
+        <svg viewBox="25 25 50 50" class="circular">
+          <circle cx="50" cy="50" r="20" fill="none" class="path"></circle>
+        </svg>
+      </div>
+    </div>
+  </div>
+  <div data-v-7f856186="" class="el-row">
+    <div data-v-7f856186="" class="el-col el-col-10 el-col-offset-11">
+      <div data-v-7f856186="" class="pagination m-v-lg">
+        <div data-v-7f856186="" class="el-pagination is-background">
+          <span class="el-pagination__total">共 104 条</span>
+          
+          <a href="/page/7" class="prev">
+            <button type="button" class="btn-prev">
+              <i class="el-icon el-icon-arrow-left"></i>
+            </button>
+          </a>
+          
+          <ul class="el-pager">
+            
+            
+            <li class="number">
+              <a href="/page/1">1</a>
+            </li>
+            
+            
+            
+            <li class="number">
+              <a href="/page/2">2</a>
+            </li>
+            
+            
+            
+            <li class="number">
+              <a href="/page/3">3</a>
+            </li>
+            
+            
+            
+            <li class="number">
+              <a href="/page/4">4</a>
+            </li>
+            
+            
+            
+            <li class="number">
+              <a href="/page/5">5</a>
+            </li>
+            
+            
+            
+            <li class="number">
+              <a href="/page/6">6</a>
+            </li>
+            
+            
+            
+            <li class="number">
+              <a href="/page/7">7</a>
+            </li>
+            
+            
+            
+            <li class="number active">
+              <a href="/page/8">8</a>
+            </li>
+            
+            
+            
+            <li class="number">
+              <a href="/page/9">9</a>
+            </li>
+            
+            
+            
+            <li class="number">
+              <a href="/page/10">10</a>
+            </li>
+            
+            
+            
+            <li class="number">
+              <a href="/page/11">11</a>
+            </li>
+            
+            
+          </ul>
+          
+          <a href="/page/9" class="next">
+            <button type="button" class="btn-next"><i class="el-icon el-icon-arrow-right"></i></button>
+          </a>
+          
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</div>
+</body>

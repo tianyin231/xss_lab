@@ -291,14 +291,78 @@ body {
   min-width: 200px;
 }
 
-.panelTitle {
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   padding: 12px 14px;
   border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+  flex-shrink: 0;
+}
+
+.panelTitle {
   font-size: 12px;
   letter-spacing: 0.4px;
   text-transform: uppercase;
   color: rgba(15, 23, 42, 0.6);
-  flex-shrink: 0;
+}
+
+.grid {
+  display: flex;
+  gap: 0;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  transition: all 0.3s ease;
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  border-radius: 18px;
+  background: #ffffff;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  overflow: hidden;
+  min-width: 200px;
+  transition: all 0.3s ease;
+}
+
+.grid.detail-view .panel:first-child {
+  width: 0 !important;
+  min-width: 0 !important;
+  opacity: 0;
+  overflow: hidden;
+}
+
+.grid.detail-view .resizer-v:first-of-type {
+  width: 0;
+  opacity: 0;
+}
+
+.grid.detail-view .panel:last-child {
+  flex: 1;
+  width: 100%;
+}
+
+.table tr.selected {
+  background: rgba(99, 102, 241, 0.1);
+  border-left: 3px solid #6366f1;
+}
+
+/* 详细视图布局 */
+.grid.detail-view {
+  grid-template-columns: auto 1px 1fr 1px auto;
+}
+
+/* 第三栏详细信息样式 */
+.panel:last-child {
+  border-left: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+/* 确保详细信息面板有足够的高度 */
+.panel .report {
+  flex: 1;
+  overflow-y: auto;
 }
 
 .log {

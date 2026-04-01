@@ -30,7 +30,7 @@ class Job(db.Model):
     status = db.Column(db.String(32), nullable=False, default=JobStatus.queued.value)
     error = db.Column(db.Text, nullable=True)
 
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.now)
     started_at = db.Column(db.DateTime, nullable=True)
     finished_at = db.Column(db.DateTime, nullable=True)
 
@@ -43,8 +43,9 @@ class Page(db.Model):
     url = db.Column(db.Text, nullable=False)
     status_code = db.Column(db.Integer, nullable=True)
     content_type = db.Column(db.String(255), nullable=True)
+    content = db.Column(db.Text, nullable=True)  # 保存HTML源码
     sha256 = db.Column(db.String(64), nullable=True)
-    fetched_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    fetched_at = db.Column(db.DateTime, nullable=False, default=datetime.now)
 
 
 class Finding(db.Model):
@@ -57,7 +58,7 @@ class Finding(db.Model):
     severity = db.Column(db.String(16), nullable=False)
     title = db.Column(db.String(255), nullable=False)
     evidence = db.Column(db.Text, nullable=False)
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.now)
 
 
 class Log(db.Model):
@@ -66,7 +67,7 @@ class Log(db.Model):
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     job_id = db.Column(db.String(36), index=True, nullable=False)
     message = db.Column(db.Text, nullable=False)
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.now)
 
 
 class AIReport(db.Model):
@@ -74,6 +75,7 @@ class AIReport(db.Model):
 
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     job_id = db.Column(db.String(36), index=True, nullable=False)
+    page_id = db.Column(db.Integer, index=True, nullable=False)  # 关联Page表
     page_url = db.Column(db.Text, nullable=False)
     summary = db.Column(db.Text, nullable=False)
     accuracy = db.Column(db.Text, nullable=True)
