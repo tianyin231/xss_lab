@@ -1,0 +1,553 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>XSSLab</title>
+    <link rel="stylesheet" href="./style.css" />
+    <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module">
+      const { createApp, ref, computed, onMounted, watch, nextTick } = Vue
+
+      createApp({
+        setup() {
+          const apiBase = ref(localStorage.getItem('apiBase') || 'http://127.0.0.1:5001/api')
+          const jobs = ref([])
+          const selectedJobId = ref(null)
+          const logs = ref([])
+          const report = ref(null)
+          const aiReport = ref([])
+          const creating = ref(false)
+          const analyzing = ref(false)
+          
+          // 布局状态
+          const sidebarWidth = ref(parseInt(localStorage.getItem('sidebarWidth') || '320'))
+          const logsWidth = ref(parseInt(localStorage.getItem('logsWidth') || '500'))
+          const isResizingSidebar = ref(false)
+          const isResizingLogs = ref(false)
+
+          // 展开与模态框状态
+          const activeModal = ref(null) // { type: 'finding' | 'page', data: any }
+
+          const form = ref({
+            target_url: '',
+            max_depth: 2,
+            max_pages: 200,
+            use_selenium: false
+          })
+
+          let es = null
+          let reportTimer = null
+
+          const selectedJob = computed(() => jobs.value.find(j => j.id === selectedJobId.value) || null)
+
+          async function fetchJobs() {
+            const res = await fetch(`${apiBase.value}/jobs`)
+            jobs.value = await res.json()
+            if (!selectedJobId.value && jobs.value.length) selectedJobId.value = jobs.value[0].id
+          }
+
+          async function fetchReport(jobId) {
+            if (!jobId) return
+            const res = await fetch(`${apiBase.value}/jobs/${jobId}/report`)
+            const data = await res.json()
+            report.value = data
+            // 从数据库加载历史日志
+            logs.value = (data.logs || []).map(l => ({ ts: l.ts, message: l.message }))
+            
+            // 自动滚动到底部
+            nextTick(() => {
+              const logContainer = document.querySelector('.log')
+              if (logContainer) logContainer.scrollTop = logContainer.scrollHeight
+            })
+          }
+
+          function triggerReportUpdate(jobId) {
+            if (reportTimer) return
+            reportTimer = setTimeout(async () => {
+              await fetchReport(jobId)
+              reportTimer = null
+            }, 1000)
+          }
+
+          function attachEvents(jobId) {
+            if (es) es.close()
+            if (reportTimer) {
+              clearTimeout(reportTimer)
+              reportTimer = null
+            }
+            es = new EventSource(`${apiBase.value}/jobs/${jobId}/events`)
+            es.addEventListener('log', (ev) => {
+              const msg = JSON.parse(ev.data)
+              const newLog = { ts: msg.ts, message: msg.data?.message || '' }
+              logs.value.push(newLog)
+              if (logs.value.length > 2000) logs.value.splice(0, logs.value.length - 2000)
+              
+              nextTick(() => {
+                const logContainer = document.querySelector('.log')
+                if (logContainer) logContainer.scrollTop = logContainer.scrollHeight
+              })
+            })
+            es.addEventListener('job', async () => {
+              await fetchJobs()
+              triggerReportUpdate(jobId)
+            })
+            es.addEventListener('page', () => {
+              triggerReportUpdate(jobId)
+            })
+            es.addEventListener('finding', () => {
+              triggerReportUpdate(jobId)
+            })
+            es.addEventListener('error', async (ev) => {
+              const msg = JSON.parse(ev.data)
+              logs.value.push({ ts: msg.ts, message: `ERROR: ${msg.data?.message || ''}` })
+              await fetchJobs()
+              triggerReportUpdate(jobId)
+            })
+          }
+
+          async function createJob() {
+            if (!form.value.target_url) {
+              alert('请输入目标网址')
+              return
+            }
+            creating.value = true
+            try {
+              const res = await fetch(`${apiBase.value}/jobs`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(form.value)
+              })
+              const body = await res.json()
+              if (!res.ok) throw new Error(body.error || '创建失败')
+              await fetchJobs()
+              selectedJobId.value = body.job_id
+              await fetchReport(body.job_id)
+              attachEvents(body.job_id)
+            } catch (err) {
+              alert(`扫描启动失败: ${err.message}`)
+            } finally {
+              creating.value = false
+            }
+          }
+
+          async function stopJob(jobId) {
+            await fetch(`${apiBase.value}/jobs/${jobId}/stop`, { method: 'POST' })
+            await fetchJobs()
+            await fetchReport(jobId)
+          }
+
+          async function deleteJob(jobId) {
+            if (!confirm('确定要彻底删除该任务及其所有扫描结果吗？此操作不可恢复。')) return
+            try {
+              const res = await fetch(`${apiBase.value}/jobs/${jobId}`, { method: 'DELETE' })
+              if (!res.ok) throw new Error('删除失败')
+              if (selectedJobId.value === jobId) {
+                selectedJobId.value = null
+                report.value = null
+                aiReport.value = null
+                logs.value = []
+              }
+              await fetchJobs()
+            } catch (err) {
+              alert(err.message)
+            }
+          }
+
+          async function analyzeJob(jobId) {
+            if (!jobId) return
+            analyzing.value = true
+            try {
+              // 添加开始分析日志
+              const startTime = Date.now()
+              logs.value.push({ ts: startTime / 1000, message: `[AI分析] 开始分析任务 ${jobId}` })
+              
+              const res = await fetch(`${apiBase.value}/jobs/${jobId}/analyze`, { method: 'POST' })
+              
+              if (!res.ok) {
+                const error = await res.json()
+                throw new Error(error.error || '分析失败')
+              }
+              
+              // 添加分析完成日志
+              const endTime = Date.now()
+              logs.value.push({ ts: endTime / 1000, message: `[AI分析] 分析完成，耗时 ${(endTime - startTime) / 1000} 秒` })
+              
+              await fetchAIReport(jobId)
+              
+              // 添加报告获取日志
+              logs.value.push({ ts: Date.now() / 1000, message: `[AI分析] 已获取AI报告` })
+              
+              alert('AI分析完成')
+            } catch (err) {
+              // 添加错误日志
+              logs.value.push({ ts: Date.now() / 1000, message: `[AI分析] 分析失败: ${err.message}` })
+              alert(`分析失败: ${err.message}`)
+            } finally {
+              analyzing.value = false
+            }
+          }
+
+          async function fetchAIReport(jobId) {
+            if (!jobId) return
+            try {
+              const res = await fetch(`${apiBase.value}/jobs/${jobId}/ai-report`)
+              aiReport.value = await res.json()
+            } catch (err) {
+              console.error('获取AI报告失败:', err)
+              aiReport.value = []
+            }
+          }
+
+          function startResizeSidebar(e) {
+            isResizingSidebar.value = true
+            document.addEventListener('mousemove', handleResize)
+            document.addEventListener('mouseup', stopResize)
+          }
+
+          function startResizeLogs(e) {
+            isResizingLogs.value = true
+            document.addEventListener('mousemove', handleResize)
+            document.addEventListener('mouseup', stopResize)
+          }
+
+          function handleResize(e) {
+            if (isResizingSidebar.value) {
+              sidebarWidth.value = e.clientX
+            } else if (isResizingLogs.value) {
+              const rect = document.querySelector('.main').getBoundingClientRect()
+              logsWidth.value = e.clientX - rect.left
+            }
+          }
+
+          function stopResize() {
+            if (isResizingSidebar.value) localStorage.setItem('sidebarWidth', sidebarWidth.value)
+            if (isResizingLogs.value) localStorage.setItem('logsWidth', logsWidth.value)
+            isResizingSidebar.value = false
+            isResizingLogs.value = false
+            document.removeEventListener('mousemove', handleResize)
+            document.removeEventListener('mouseup', stopResize)
+          }
+
+          function openModal(type, data) {
+            activeModal.value = { type, data }
+          }
+
+          function closeModal() {
+            activeModal.value = null
+          }
+
+          onMounted(async () => {
+            await fetchJobs()
+            if (selectedJobId.value) {
+              await fetchReport(selectedJobId.value)
+              attachEvents(selectedJobId.value)
+            }
+            
+            // 按 ESC 关闭模态框
+            window.addEventListener('keydown', (e) => {
+              if (e.key === 'Escape') closeModal()
+            })
+          })
+
+          watch(apiBase, (v) => {
+            localStorage.setItem('apiBase', v)
+          })
+
+          watch(selectedJobId, async (jobId) => {
+            if (!jobId) return
+            closeModal()
+            await fetchJobs()
+            await fetchReport(jobId)
+            await fetchAIReport(jobId)
+            attachEvents(jobId)
+          })
+
+          return {
+            apiBase, jobs, selectedJobId, selectedJob, logs, report, aiReport, form, creating, analyzing,
+            sidebarWidth, logsWidth, isResizingSidebar, isResizingLogs,
+            activeModal,
+            fetchJobs, fetchReport, createJob, stopJob, deleteJob, analyzeJob, fetchAIReport,
+            startResizeSidebar, startResizeLogs, openModal, closeModal
+          }
+        },
+        template: `
+          <div class="layout">
+            <aside class="sidebar" :style="{ width: sidebarWidth + 'px' }">
+              <div class="sidebar-content">
+                <div class="brand">
+                  <div class="title">XSSLab</div>
+                  <div class="sub">任务与报告</div>
+                </div>
+
+                <div class="card">
+                  <div class="cardTitle">API</div>
+                  <input class="input" v-model="apiBase" placeholder="http://127.0.0.1:5001/api" />
+                </div>
+
+                <div class="card">
+                  <div class="cardTitle">新建任务</div>
+                  <label class="label">目标网址</label>
+                  <input class="input" v-model="form.target_url" placeholder="https://example.com/" />
+                  <div class="row">
+                    <div class="col">
+                      <label class="label">深度</label>
+                      <input class="input" v-model.number="form.max_depth" type="number" min="0" max="10" />
+                    </div>
+                    <div class="col">
+                      <label class="label">页数</label>
+                      <input class="input" v-model.number="form.max_pages" type="number" min="1" max="20000" />
+                    </div>
+                  </div>
+                  <label class="check">
+                    <input type="checkbox" v-model="form.use_selenium" />
+                    <span>使用 Selenium（可选）</span>
+                  </label>
+                  <button class="btn" :disabled="creating" @click="createJob">
+                    {{ creating ? '创建中…' : '开始扫描' }}
+                  </button>
+                </div>
+
+                <div class="card">
+                  <div class="cardTitle">任务列表</div>
+                  <div class="jobList">
+                    <button
+                      v-for="j in jobs"
+                      :key="j.id"
+                      class="job"
+                      :class="{ active: j.id === selectedJobId }"
+                      @click="selectedJobId = j.id"
+                    >
+                      <div class="jobUrl">{{ j.target_url }}</div>
+                      <div class="jobMeta">
+                        <span class="pill">{{ j.status }}</span>
+                        <span class="mono">{{ j.id.slice(0, 8) }}</span>
+                      </div>
+                      <button class="jobDeleteBtn" title="删除任务" @click.stop="deleteJob(j.id)">
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                          <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2M10 11v6M14 11v6"/>
+                        </svg>
+                      </button>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </aside>
+
+            <div class="resizer-v" :class="{ active: isResizingSidebar }" @mousedown="startResizeSidebar"></div>
+
+            <main class="main">
+              <div class="topbar">
+                <div>
+                  <div class="h1">实时任务</div>
+                  <div class="muted" v-if="selectedJob">{{ selectedJob.target_url }}</div>
+                </div>
+                <div class="actions" v-if="selectedJob">
+                  <button class="btnGhost" @click="async () => { await fetchJobs(); await fetchReport(selectedJob.id); }">刷新报告</button>
+                  <button class="btn" :disabled="analyzing" @click="analyzeJob(selectedJob.id)">
+                    {{ analyzing ? '分析中...' : 'AI分析' }}
+                  </button>
+                  <button class="btnDanger" v-if="selectedJob.status === 'running'" @click="stopJob(selectedJob.id)">停止</button>
+                </div>
+              </div>
+
+              <div class="grid">
+                <section class="panel" :style="{ width: logsWidth + 'px' }">
+                  <div class="panelTitle">实时日志</div>
+                  <div class="log">
+                    <div class="logLine" v-for="(l, idx) in logs" :key="idx">
+                      <span class="mono">{{ new Date(l.ts * 1000).toLocaleTimeString() }}</span>
+                      <span class="logMsg">{{ l.message }}</span>
+                    </div>
+                  </div>
+                </section>
+
+                <div class="resizer-v" :class="{ active: isResizingLogs }" @mousedown="startResizeLogs"></div>
+
+                <section class="panel" style="flex: 1">
+                  <div class="panelTitle">扫描报告</div>
+                  <div v-if="!report" class="muted" style="padding: 20px">暂无</div>
+                  <div v-else class="report">
+                    <!-- 扫描概览 -->
+                    <div class="section">
+                      <div class="sectionTitle">扫描概览</div>
+                      <div class="kpis">
+                        <div class="kpi">
+                          <div class="kpiLabel">页面</div>
+                          <div class="kpiValue">{{ report.stats.pages }}</div>
+                        </div>
+                        <div class="kpi">
+                          <div class="kpiLabel">发现</div>
+                          <div class="kpiValue">{{ report.stats.findings }}</div>
+                        </div>
+                        <div class="kpi">
+                          <div class="kpiLabel">状态</div>
+                          <div class="kpiValue">{{ report.job.status }}</div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- 发现列表 -->
+                    <div class="section">
+                      <div class="sectionTitle">发现列表（点击查看详情）</div>
+                      <div class="tableWrap">
+                        <table class="table">
+                          <thead>
+                            <tr>
+                              <th style="width: 80px">级别</th>
+                              <th style="width: 120px">类型</th>
+                              <th>标题</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr v-for="(f, idx) in report.findings" :key="idx" class="clickable" @click="openModal('finding', f)">
+                              <td><span class="pill" :class="'sev_' + f.severity">{{ f.severity }}</span></td>
+                              <td class="mono">{{ f.kind }}</td>
+                              <td>{{ f.title }}</td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+
+                    <!-- 已爬取页面 -->
+                    <div class="section">
+                      <div class="sectionTitle">已爬取页面（最近 100）</div>
+                      <div class="tableWrap">
+                        <table class="table">
+                          <thead>
+                            <tr>
+                              <th style="width: 60px">状态</th>
+                              <th style="width: 120px">类型</th>
+                              <th>URL</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr v-for="(p, idx) in report.pages.slice(-100)" :key="idx" class="clickable" @click="openModal('page', p)">
+                              <td class="mono">{{ p.status_code }}</td>
+                              <td class="mono">{{ p.content_type }}</td>
+                              <td class="mono">{{ p.url }}</td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+
+                    <!-- AI分析报告 -->
+                    <div v-if="aiReport && aiReport.length > 0" class="section">
+                      <div class="sectionTitle">AI分析报告</div>
+                      <div class="ai-report">
+                        <div v-for="(r, idx) in aiReport" :key="idx" class="ai-report-card">
+                          <div class="ai-report-header">
+                            <div class="ai-report-url">{{ r.page_url }}</div>
+                            <div class="ai-report-date">{{ new Date(r.created_at).toLocaleString() }}</div>
+                          </div>
+                          <div class="ai-report-content">
+                            <div class="ai-report-section">
+                              <div class="ai-report-label">分析摘要</div>
+                              <div class="ai-report-value">{{ r.summary }}</div>
+                            </div>
+                            <div class="ai-report-section" v-if="r.accuracy">
+                              <div class="ai-report-label">测试准确性</div>
+                              <div class="ai-report-value">{{ r.accuracy }}</div>
+                            </div>
+                            <div class="ai-report-section" v-if="r.risk_assessment">
+                              <div class="ai-report-label">风险评估</div>
+                              <div class="ai-report-value">{{ r.risk_assessment }}</div>
+                            </div>
+                            <div class="ai-report-section" v-if="r.suggestions && r.suggestions.length > 0">
+                              <div class="ai-report-label">改进建议</div>
+                              <ul class="ai-report-list">
+                                <li v-for="(s, i) in r.suggestions" :key="i">{{ s }}</li>
+                              </ul>
+                            </div>
+                            <div class="ai-report-section" v-if="r.full_report">
+                              <div class="ai-report-label">详细报告</div>
+                              <div class="ai-report-full">{{ r.full_report }}</div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+              </div>
+            </main>
+
+            <!-- 模态框 -->
+            <div v-if="activeModal" class="modal-overlay" @click.self="closeModal">
+              <div class="modal">
+                <div class="modal-header">
+                  <div class="modal-title">
+                    {{ activeModal.type === 'finding' ? '发现详情' : '页面详情' }}
+                  </div>
+                  <button class="modal-close" @click="closeModal">
+                    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5">
+                      <path d="M18 6L6 18M6 6l12 12"/>
+                    </svg>
+                  </button>
+                </div>
+                <div class="modal-body">
+                  <template v-if="activeModal.type === 'finding'">
+                    <div class="modal-section">
+                      <div class="modal-label">漏洞标题</div>
+                      <div class="modal-value" style="font-weight: 700; font-size: 16px;">{{ activeModal.data.title }}</div>
+                    </div>
+                    <div class="modal-section">
+                      <div class="modal-label">危险等级</div>
+                      <div class="modal-value">
+                        <span class="pill" :class="'sev_' + activeModal.data.severity">{{ activeModal.data.severity }}</span>
+                      </div>
+                    </div>
+                    <div class="modal-section">
+                      <div class="modal-label">目标 URL</div>
+                      <div class="modal-value mono">{{ activeModal.data.url }}</div>
+                    </div>
+                    <div class="modal-section">
+                      <div class="modal-label">漏洞证据 / 源码片段</div>
+                      <div class="code-block">{{ activeModal.data.evidence }}</div>
+                    </div>
+                    <div class="modal-section">
+                      <div class="modal-label">发现时间</div>
+                      <div class="modal-value">{{ new Date(activeModal.data.created_at).toLocaleString() }}</div>
+                    </div>
+                  </template>
+                  
+                  <template v-else-if="activeModal.type === 'page'">
+                    <div class="modal-section">
+                      <div class="modal-label">页面 URL</div>
+                      <div class="modal-value mono" style="font-weight: 700;">{{ activeModal.data.url }}</div>
+                    </div>
+                    <div class="modal-section">
+                      <div class="row">
+                        <div class="col">
+                          <div class="modal-label">HTTP 状态码</div>
+                          <div class="modal-value">{{ activeModal.data.status_code }}</div>
+                        </div>
+                        <div class="col">
+                          <div class="modal-label">内容类型</div>
+                          <div class="modal-value">{{ activeModal.data.content_type }}</div>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="modal-section">
+                      <div class="modal-label">内容 SHA256</div>
+                      <div class="modal-value mono">{{ activeModal.data.sha256 }}</div>
+                    </div>
+                    <div class="modal-section">
+                      <div class="modal-label">抓取时间</div>
+                      <div class="modal-value">{{ new Date(activeModal.data.fetched_at).toLocaleString() }}</div>
+                    </div>
+                  </template>
+                </div>
+              </div>
+            </div>
+          </div>
+        `
+      }).mount('#app')
+    </script>
+  </body>
+</html>
