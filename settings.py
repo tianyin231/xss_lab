@@ -1,62 +1,66 @@
 
-# ============================================================
-# XSSLab - 全局配置
-# ============================================================
+"""
+项目全局配置。
 
-# ------------------------------------------------------------
-# 系统基础配置
-# ------------------------------------------------------------
+优先级:
+1. 环境变量
+2. 本文件默认值
+"""
+
 SYSTEM_NAME = "XSSLab"
 SYSTEM_VERSION = "0.1.0"
 
-LOG_DIR = "logs"
-LOG_LEVEL = "INFO"
-LOG_FILE_ENCODING = "utf-8"
-LOG_SPLIT_MODE = "by_run"
-LOG_CONSOLE_VERBOSE = True
-
-REPORT_DIR = "reports"
-REPORT_FORMAT = "json"
-REPORT_FAILED_ONLY = False
-REPORT_SPLIT_MODE = "by_run"
-
-# ------------------------------------------------------------
-# Web / API 配置
-# ------------------------------------------------------------
 HOST = "127.0.0.1"
 PORT = 5001
 FLASK_DEBUG = True
 CORS_ORIGINS = "*"
 
-# ------------------------------------------------------------
-# 数据库配置（优先 DATABASE_URL；否则使用 MYSQL_* 组装）
-# ------------------------------------------------------------
-DATABASE_URL = ""
-# DATABASE_URL = "sqlite:////Users/chen/PycharmProjects/xss/dev.db"
+FRONTEND_HOST = "127.0.0.1"
+FRONTEND_PORT = 5173
+FRONTEND_DIR = "web"
+WEB_API_BASE = "http://127.0.0.1:5001/api"
+
 DATABASE_URL = "sqlite:///dev.db"
-# DATABASE_URL = "mysql+pymysql://root:pass@127.0.0.1:3306/server?charset=utf8mb4"
 MYSQL_HOST = "127.0.0.1"
 MYSQL_PORT = 3306
 MYSQL_USER = "root"
 MYSQL_PASSWORD = ""
 MYSQL_DATABASE = "server"
-
 MYSQL_POOL_SIZE = 10
 MYSQL_MAX_OVERFLOW = 20
 
-# ------------------------------------------------------------
-# 爬虫 / 扫描配置
-# ------------------------------------------------------------
-CRAWLER_USER_AGENT = "server-crawler/0.1"
-SCRAPY_HTTPCACHE_DIR = ".httpcache"
+MAX_DEPTH_DEFAULT = 2
+MAX_PAGES_DEFAULT = 200
+USE_SELENIUM_DEFAULT = False
 
+CRAWLER_USER_AGENT = "server-crawler/0.1"
 CRAWLER_ROBOTSTXT_OBEY = True
 CRAWLER_CONCURRENT_REQUESTS = 16
 CRAWLER_CONCURRENT_REQUESTS_PER_DOMAIN = 8
 CRAWLER_DOWNLOAD_TIMEOUT = 20
 CRAWLER_RETRY_TIMES = 2
+SCRAPY_HTTPCACHE_DIR = ".scrapy/.httpcache"
+SCRAPY_LOG_LEVEL = "DEBUG"
 
-MAX_DEPTH_DEFAULT = 2
-MAX_PAGES_DEFAULT = 200
+SELENIUM_ENABLED = True
+SELENIUM_TIMEOUT = 20
+SELENIUM_WAIT_SECONDS = 2
 
-USE_SELENIUM_DEFAULT = False
+AI_ENABLED = True
+AI_PROVIDER = "deepseek"
+AI_MODEL = "deepseek-chat"
+AI_API_KEY = "sk-130bf79101914f0cac13672bba65ad0b"
+AI_BASE_URL = "https://api.deepseek.com/v1"
+AI_TIMEOUT = 60.0
+AI_TEMPERATURE = 0.3
+AI_MAX_TOKENS = 2000
+
+DYNAMIC_VERIFY_ENABLED = True
+DYNAMIC_VERIFY_USE_SELENIUM = False
+DYNAMIC_VERIFY_MAX_PAGES = 10
+DYNAMIC_VERIFY_MAX_FORMS_PER_PAGE = 3
+DYNAMIC_VERIFY_TIMEOUT = 15.0
+DYNAMIC_VERIFY_WAIT_SECONDS = 2.0
+DYNAMIC_VERIFY_PAYLOAD = "xsslab_verify_payload_2026"
+DYNAMIC_VERIFY_TRUST_ENV = False
+DYNAMIC_VERIFY_SSL_VERIFY = False

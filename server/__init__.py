@@ -5,9 +5,8 @@
 from __future__ import annotations
 
 import os
-import importlib
-from typing import Any
 
+from app_config import get, get_int
 from flask import Flask
 from flask import jsonify
 from flask_cors import CORS
@@ -44,8 +43,8 @@ def create_app() -> Flask:
     # 只对MySQL数据库应用连接池参数
     if db_uri.startswith(('mysql://', 'mysql+pymysql://')):
         engine_options.update({
-            "pool_size": _get_int("MYSQL_POOL_SIZE", 10),
-            "max_overflow": _get_int("MYSQL_MAX_OVERFLOW", 20),
+            "pool_size": get_int("MYSQL_POOL_SIZE", 10),
+            "max_overflow": get_int("MYSQL_MAX_OVERFLOW", 20),
         })
     
     app.config.from_mapping(
@@ -54,7 +53,7 @@ def create_app() -> Flask:
         SQLALCHEMY_ENGINE_OPTIONS=engine_options,
     )
 
-    CORS(app, resources={r"/api/*": {"origins": _get("CORS_ORIGINS", "*")}})
+    CORS(app, resources={r"/api/*": {"origins": get("CORS_ORIGINS", "*")}})
 
     db.init_app(app)
     with app.app_context():
@@ -70,8 +69,8 @@ def create_app() -> Flask:
     def _root() -> Any:
         return jsonify(
             {
-                "name": str(_get("SYSTEM_NAME", "XSSLab")),
-                "version": str(_get("SYSTEM_VERSION", "0.1.0")),
+                "name": str(get("SYSTEM_NAME", "XSSLab")),
+                "version": str(get("SYSTEM_VERSION", "0.1.0")),
                 "api_base": "/api",
                 "health": "ok",
                 "endpoints": [
@@ -87,49 +86,19 @@ def create_app() -> Flask:
         )
 
     return app
-
-
-def _settings_module() -> Any | None:
-    try:
-        return importlib.import_module("settings")
-    except Exception:
-        return None
-
-
-_SETTINGS = _settings_module()
-
-
-def _get(name: str, default: Any) -> Any:
-    if name in os.environ:
-        return os.environ[name]
-    if _SETTINGS is not None and hasattr(_SETTINGS, name):
-        return getattr(_SETTINGS, name)
-    return default
-
-
-def _get_int(name: str, default: int) -> int:
-    v = _get(name, None)
-    if v is None or v == "":
-        return default
-    try:
-        return int(v)
-    except Exception:
-        return default
-
-
 def _db_uri() -> str:
-    v = _get("DATABASE_URL", None)
+    v = get("DATABASE_URL", None)
     if v:
         return str(v)
     return _mysql_uri()
 
 
 def _mysql_uri() -> str:
-    user = str(_get("MYSQL_USER", "root"))
-    password = str(_get("MYSQL_PASSWORD", ""))
-    host = str(_get("MYSQL_HOST", "127.0.0.1"))
-    port = str(_get("MYSQL_PORT", "3306"))
-    database = str(_get("MYSQL_DATABASE", "server"))
+    user = str(get("MYSQL_USER", "root"))
+    password = str(get("MYSQL_PASSWORD", ""))
+    host = str(get("MYSQL_HOST", "127.0.0.1"))
+    port = str(get("MYSQL_PORT", "3306"))
+    database = str(get("MYSQL_DATABASE", "server"))
     return f"mysql+pymysql://{user}:{password}@{host}:{port}/{database}?charset=utf8mb4"
 
 

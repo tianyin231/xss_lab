@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>XSSLab</title>
     <link rel="stylesheet" href="./style.css" />
+    <script src="./config.js"></script>
     <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
   </head>
   <body>
@@ -14,7 +15,8 @@
 
       createApp({
         setup() {
-          const apiBase = ref(localStorage.getItem('apiBase') || 'http://127.0.0.1:5001/api')
+          const defaultApiBase = window.APP_CONFIG?.apiBase || 'http://127.0.0.1:5001/api'
+          const apiBase = ref(localStorage.getItem('apiBase') || defaultApiBase)
           const jobs = ref([])
           const selectedJobId = ref(null)
           const logs = ref([])
@@ -33,6 +35,8 @@
           const isDetailView = ref(false) // 控制是否显示详细视图
           const selectedFinding = ref(null) // 选中的风险点
           const selectedPage = ref(null) // 选中的页面
+          const selectedAiReport = ref(null) // 选中的AI报告
+          const selectedVerification = ref(null) // 选中的动态验证结果
 
           // 展开与模态框状态
           const activeModal = ref(null) // { type: 'finding' | 'page', data: any }
@@ -48,6 +52,80 @@
           let reportTimer = null
 
           const selectedJob = computed(() => jobs.value.find(j => j.id === selectedJobId.value) || null)
+          const selectedPageFindings = computed(() => {
+            if (!selectedPage.value?.url || !report.value?.findings?.length) return []
+            return report.value.findings.filter(finding =>
+              (finding.instances || []).some(item => item.url === selectedPage.value.url)
+            )
+          })
+          const selectedPageHighlightedHtml = computed(() => {
+            if (!selectedPage.value?.content || !selectedPageFindings.value.length) return ''
+            const mergedFinding = {
+              instances: selectedPageFindings.value.flatMap(finding =>
+                (finding.instances || []).filter(item => item.url === selectedPage.value.url)
+              )
+            }
+            return buildHighlightedSource(selectedPage.value.content, mergedFinding, selectedPage.value.url)
+          })
+
+          function formatDateTime(value) {
+            if (value === null || value === undefined || value === '') return '-'
+            const date = typeof value === 'number' ? new Date(value * 1000) : new Date(value)
+            if (Number.isNaN(date.getTime())) return '-'
+            const formatter = new Intl.DateTimeFormat('zh-CN', {
+              timeZone: 'Asia/Shanghai',
+              year: 'numeric',
+              month: '2-digit',
+              day: '2-digit',
+              hour: '2-digit',
+              minute: '2-digit',
+              second: '2-digit',
+              hour12: false
+            })
+            const parts = Object.fromEntries(formatter.formatToParts(date).map(part => [part.type, part.value]))
+            return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`
+          }
+
+          function escapeHtml(value) {
+            return String(value)
+              .replace(/&/g, '&amp;')
+              .replace(/</g, '&lt;')
+              .replace(/>/g, '&gt;')
+              .replace(/"/g, '&quot;')
+              .replace(/'/g, '&#39;')
+          }
+
+          function buildHighlightedSource(content, finding, pageUrl) {
+            const lines = String(content || '').split('\n')
+            const hitLines = new Set(
+              (finding.instances || [])
+                .filter(item => !item.url || item.url === pageUrl)
+                .map(item => Number(item.line))
+                .filter(line => Number.isFinite(line) && line > 0)
+            )
+            return lines
+              .map((line, index) => {
+                const lineNo = index + 1
+                const cls = hitLines.has(lineNo) ? 'source-line source-line-hit' : 'source-line'
+                return (
+                  '<div class="' + cls + '">' +
+                    '<span class="source-line-no">' + lineNo + '</span>' +
+                    '<span class="source-line-text">' + escapeHtml(line) + '</span>' +
+                  '</div>'
+                )
+              })
+              .join('')
+          }
+
+          function scrollToHighlightedSource() {
+            nextTick(() => {
+              const container = document.querySelector('.source-view')
+              const target = container?.querySelector('.source-line-hit')
+              if (container && target) {
+                target.scrollIntoView({ block: 'center', behavior: 'smooth' })
+              }
+            })
+          }
 
           async function fetchJobs() {
             const res = await fetch(`${apiBase.value}/jobs`)
@@ -60,6 +138,12 @@
             const res = await fetch(`${apiBase.value}/jobs/${jobId}/report`)
             const data = await res.json()
             report.value = data
+            if (selectedFinding.value && data.findings?.length) {
+              const matchedFinding = data.findings.find(item =>
+                item.kind === selectedFinding.value.kind && item.title === selectedFinding.value.title
+              )
+              if (matchedFinding) selectedFinding.value = matchedFinding
+            }
             // 从数据库加载历史日志
             logs.value = (data.logs || []).map(l => ({ ts: l.ts, message: l.message }))
             
@@ -237,20 +321,14 @@
             document.removeEventListener('mouseup', stopResize)
           }
 
-          async function openModal(type, data) {
-            if (type === 'page' && data.id) {
-              // 获取页面详细信息，包括HTML源码
-              try {
-                const res = await fetch(`${apiBase.value}/pages/${data.id}`)
-                const pageDetail = await res.json()
-                activeModal.value = { type, data: { ...data, content: pageDetail.content } }
-              } catch (err) {
-                console.error('获取页面详情失败:', err)
-                activeModal.value = { type, data }
-              }
-            } else {
-              activeModal.value = { type, data }
-            }
+          async function fetchPageDetail(pageId) {
+            const res = await fetch(`${apiBase.value}/pages/${pageId}`)
+            if (!res.ok) throw new Error('获取页面详情失败')
+            return await res.json()
+          }
+
+          function openModal(type, data) {
+            activeModal.value = { type, data }
           }
 
           function closeModal() {
@@ -262,17 +340,64 @@
             if (!isDetailView.value) {
               selectedFinding.value = null
               selectedPage.value = null
+              selectedAiReport.value = null
+              selectedVerification.value = null
             }
           }
 
-          function selectFinding(finding) {
+          async function selectFinding(finding) {
             selectedFinding.value = finding
             selectedPage.value = null
+            selectedAiReport.value = null
+            selectedVerification.value = null
           }
 
-          function selectPage(page) {
-            selectedPage.value = page
+          async function updateFindingStatus(status) {
+            if (!selectedJobId.value || !selectedFinding.value) return
+            try {
+              const res = await fetch(`${apiBase.value}/jobs/${selectedJobId.value}/finding-status`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  kind: selectedFinding.value.kind,
+                  title: selectedFinding.value.title,
+                  status
+                })
+              })
+              const body = await res.json()
+              if (!res.ok) throw new Error(body.error || '状态更新失败')
+              await fetchReport(selectedJobId.value)
+            } catch (err) {
+              alert(`状态更新失败: ${err.message}`)
+            }
+          }
+
+          async function selectPage(page) {
+            try {
+              const pageDetail = page.id ? await fetchPageDetail(page.id) : page
+              selectedPage.value = { ...page, ...pageDetail }
+            } catch (err) {
+              console.error('获取页面详情失败:', err)
+              selectedPage.value = page
+            }
             selectedFinding.value = null
+            selectedAiReport.value = null
+            selectedVerification.value = null
+            scrollToHighlightedSource()
+          }
+
+          function selectAiReport(item) {
+            selectedAiReport.value = item
+            selectedFinding.value = null
+            selectedPage.value = null
+            selectedVerification.value = null
+          }
+
+          function selectVerification(item) {
+            selectedVerification.value = item
+            selectedFinding.value = null
+            selectedPage.value = null
+            selectedAiReport.value = null
           }
 
           function startResizeDetail(e) {
@@ -326,15 +451,20 @@
             await fetchJobs()
             await fetchReport(jobId)
             await fetchAIReport(jobId)
+            selectedFinding.value = null
+            selectedPage.value = null
+            selectedAiReport.value = null
+            selectedVerification.value = null
             attachEvents(jobId)
           })
 
           return {
             apiBase, jobs, selectedJobId, selectedJob, logs, report, aiReport, form, creating, analyzing,
-            sidebarWidth, logsWidth, detailWidth, isResizingSidebar, isResizingLogs, isResizingDetail, isDetailView, selectedFinding, selectedPage,
+            sidebarWidth, logsWidth, detailWidth, isResizingSidebar, isResizingLogs, isResizingDetail, isDetailView, selectedFinding, selectedPage, selectedAiReport, selectedVerification,
             activeModal,
+            formatDateTime, selectedPageFindings, selectedPageHighlightedHtml,
             fetchJobs, fetchReport, createJob, stopJob, deleteJob, analyzeJob, fetchAIReport,
-            startResizeSidebar, startResizeLogs, startResizeDetail, openModal, closeModal, toggleDetailView, selectFinding, selectPage
+            startResizeSidebar, startResizeLogs, startResizeDetail, openModal, closeModal, toggleDetailView, selectFinding, selectPage, selectAiReport, selectVerification, updateFindingStatus
           }
         },
         template: `
@@ -377,24 +507,26 @@
                 <div class="card">
                   <div class="cardTitle">任务列表</div>
                   <div class="jobList">
-                    <button
+                    <div
                       v-for="j in jobs"
                       :key="j.id"
                       class="job"
                       :class="{ active: j.id === selectedJobId }"
                       @click="selectedJobId = j.id"
                     >
-                      <div class="jobUrl">{{ j.target_url }}</div>
+                      <div class="jobHeader">
+                        <div class="jobUrl">{{ j.target_url }}</div>
+                        <button class="jobDeleteBtn" title="删除任务" @click.stop="deleteJob(j.id)">
+                          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2M10 11v6M14 11v6"/>
+                          </svg>
+                        </button>
+                      </div>
                       <div class="jobMeta">
                         <span class="pill">{{ j.status }}</span>
                         <span class="mono">{{ j.id.slice(0, 8) }}</span>
                       </div>
-                      <button class="jobDeleteBtn" title="删除任务" @click.stop="deleteJob(j.id)">
-                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-                          <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2M10 11v6M14 11v6"/>
-                        </svg>
-                      </button>
-                    </button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -409,11 +541,14 @@
                   <div class="muted" v-if="selectedJob">{{ selectedJob.target_url }}</div>
                 </div>
                 <div class="actions" v-if="selectedJob">
-                  <button class="btnGhost" @click="async () => { await fetchJobs(); await fetchReport(selectedJob.id); }">刷新报告</button>
-                  <button class="btn" :disabled="analyzing" @click="analyzeJob(selectedJob.id)">
+                  <button class="topActionBtn" v-if="selectedJob.status === 'running'" @click="stopJob(selectedJob.id)">停止</button>
+                  <button class="topActionBtn" @click="toggleDetailView">
+                    {{ isDetailView ? '返回' : '详细视图' }}
+                  </button>
+                  <button class="topActionBtn" @click="async () => { await fetchJobs(); await fetchReport(selectedJob.id); }">刷新报告</button>
+                  <button class="topActionBtn" :disabled="analyzing" @click="analyzeJob(selectedJob.id)">
                     {{ analyzing ? '分析中...' : 'AI分析' }}
                   </button>
-                  <button class="btnDanger" v-if="selectedJob.status === 'running'" @click="stopJob(selectedJob.id)">停止</button>
                 </div>
               </div>
 
@@ -423,7 +558,7 @@
                   <div class="panelTitle">实时日志</div>
                   <div class="log">
                     <div class="logLine" v-for="(l, idx) in logs" :key="idx">
-                      <span class="mono">{{ new Date(l.ts * 1000).toLocaleTimeString() }}</span>
+                      <span class="mono">{{ formatDateTime(l.ts) }}</span>
                       <span class="logMsg">{{ l.message }}</span>
                     </div>
                   </div>
@@ -435,9 +570,6 @@
                 <section class="panel" style="flex: 1">
                   <div class="panel-header">
                     <div class="panelTitle">扫描报告</div>
-                    <button class="btnGhost" @click="toggleDetailView">
-                      {{ isDetailView ? '返回' : '详细视图' }}
-                    </button>
                   </div>
                   <div v-if="!report" class="muted" style="padding: 20px">暂无</div>
                   <div v-else class="report">
@@ -468,6 +600,8 @@
                           <thead>
                             <tr>
                               <th style="width: 80px">级别</th>
+                              <th style="width: 110px">最终判断</th>
+                              <th style="width: 96px">状态</th>
                               <th style="width: 120px">类型</th>
                               <th>标题</th>
                             </tr>
@@ -475,6 +609,8 @@
                           <tbody>
                             <tr v-for="(f, idx) in report.findings" :key="idx" class="clickable" :class="{ 'selected': selectedFinding && selectedFinding.title === f.title }" @click="isDetailView ? selectFinding(f) : openModal('finding', f)">
                               <td><span class="pill" :class="'sev_' + f.severity">{{ f.severity }}</span></td>
+                              <td><span class="pill" :class="'assessment_' + f.final_assessment">{{ f.final_assessment_label || f.final_assessment }}</span></td>
+                              <td><span class="pill review-pill">{{ f.review_status_label || f.review_status }}</span></td>
                               <td class="mono">{{ f.kind }}</td>
                               <td>{{ f.title }}</td>
                             </tr>
@@ -509,37 +645,65 @@
                     <!-- AI分析报告 -->
                     <div v-if="aiReport && aiReport.length > 0" class="section">
                       <div class="sectionTitle">AI分析报告</div>
-                      <div class="ai-report">
-                        <div v-for="(r, idx) in aiReport" :key="idx" class="ai-report-card">
-                          <div class="ai-report-header">
-                            <div class="ai-report-url">{{ r.page_url }}</div>
-                            <div class="ai-report-date">{{ new Date(r.created_at).toLocaleString() }}</div>
-                          </div>
-                          <div class="ai-report-content">
-                            <div class="ai-report-section">
-                              <div class="ai-report-label">分析摘要</div>
-                              <div class="ai-report-value">{{ r.summary }}</div>
-                            </div>
-                            <div class="ai-report-section" v-if="r.accuracy">
-                              <div class="ai-report-label">测试准确性</div>
-                              <div class="ai-report-value">{{ r.accuracy }}</div>
-                            </div>
-                            <div class="ai-report-section" v-if="r.risk_assessment">
-                              <div class="ai-report-label">风险评估</div>
-                              <div class="ai-report-value">{{ r.risk_assessment }}</div>
-                            </div>
-                            <div class="ai-report-section" v-if="r.suggestions && r.suggestions.length > 0">
-                              <div class="ai-report-label">改进建议</div>
-                              <ul class="ai-report-list">
-                                <li v-for="(s, i) in r.suggestions" :key="i">{{ s }}</li>
-                              </ul>
-                            </div>
-                            <div class="ai-report-section" v-if="r.full_report">
-                              <div class="ai-report-label">详细报告</div>
-                              <div class="ai-report-full">{{ r.full_report }}</div>
-                            </div>
-                          </div>
-                        </div>
+                      <div class="tableWrap">
+                        <table class="table">
+                          <thead>
+                            <tr>
+                              <th style="width: 220px">页面</th>
+                              <th>摘要</th>
+                              <th style="width: 170px">时间</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr
+                              v-for="(r, idx) in aiReport"
+                              :key="idx"
+                              class="clickable"
+                              :class="{ selected: selectedAiReport && selectedAiReport.id === r.id }"
+                              @click="isDetailView ? selectAiReport(r) : openModal('ai', r)"
+                            >
+                              <td class="mono">{{ r.page_url }}</td>
+                              <td>{{ r.summary }}</td>
+                              <td class="mono">{{ formatDateTime(r.created_at) }}</td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+
+                    <div v-if="report.dynamic_verification && report.dynamic_verification.results && report.dynamic_verification.results.length > 0" class="section">
+                      <div class="sectionTitle">动态验证结果</div>
+                      <div class="tableWrap">
+                        <table class="table">
+                          <thead>
+                            <tr>
+                              <th style="width: 90px">等级</th>
+                              <th style="width: 90px">向量</th>
+                              <th style="width: 140px">参数</th>
+                              <th>摘要</th>
+                              <th style="width: 170px">时间</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr
+                              v-for="(item, idx) in report.dynamic_verification.results"
+                              :key="'verify-' + idx"
+                              class="clickable"
+                              :class="{ selected: selectedVerification && selectedVerification.id === item.id }"
+                              @click="isDetailView ? selectVerification(item) : openModal('verification', item)"
+                            >
+                              <td>
+                                <span class="pill" :class="'sev_' + (item.level === 'confirmed' ? 'high' : item.level === 'suspected' ? 'medium' : 'low')">
+                                  {{ item.level }}
+                                </span>
+                              </td>
+                              <td class="mono">{{ item.vector }}</td>
+                              <td class="mono">{{ item.parameter_name || '-' }}</td>
+                              <td>{{ item.summary }}</td>
+                              <td class="mono">{{ formatDateTime(item.created_at) }}</td>
+                            </tr>
+                          </tbody>
+                        </table>
                       </div>
                     </div>
                   </div>
@@ -564,30 +728,169 @@
                         </div>
                       </div>
                       <div class="modal-section">
-                        <div class="modal-label">目标 URL</div>
-                        <div class="modal-value mono">{{ selectedFinding.url }}</div>
+                        <div class="modal-label">涉及页面</div>
+                        <div class="modal-value mono">
+                          <template v-if="selectedFinding.urls && selectedFinding.urls.length">
+                            {{ selectedFinding.urls.join(' | ') }}
+                          </template>
+                          <template v-else>
+                            {{ selectedFinding.url }}
+                          </template>
+                        </div>
                       </div>
                       <div class="modal-section">
                         <div class="modal-label">漏洞类型</div>
                         <div class="modal-value">{{ selectedFinding.kind }}</div>
                       </div>
                       <div class="modal-section">
+                        <div class="modal-label">最终判断</div>
+                        <div class="modal-value">
+                          <span class="pill" :class="'assessment_' + selectedFinding.final_assessment">
+                            {{ selectedFinding.final_assessment_label || selectedFinding.final_assessment }}
+                          </span>
+                        </div>
+                      </div>
+                      <div class="modal-section">
+                        <div class="modal-label">人工状态</div>
+                        <div class="status-row">
+                          <select class="input status-select" :value="selectedFinding.review_status || 'open'" @change="updateFindingStatus($event.target.value)">
+                            <option value="open">待处理</option>
+                            <option value="confirmed">人工确认</option>
+                            <option value="false_positive">误报</option>
+                            <option value="fixed">已修复</option>
+                            <option value="ignored">已忽略</option>
+                          </select>
+                          <span class="muted-inline">{{ selectedFinding.review_status_label || '待处理' }}</span>
+                        </div>
+                      </div>
+                      <div class="modal-section" v-if="selectedFinding.summary">
+                        <div class="modal-label">聚合总结</div>
+                        <div class="modal-value">{{ selectedFinding.summary }}</div>
+                      </div>
+                      <div class="modal-section" v-if="selectedFinding.instance_count">
+                        <div class="modal-label">命中数量</div>
+                        <div class="modal-value">{{ selectedFinding.instance_count }} 处</div>
+                      </div>
+                      <div class="modal-section">
                         <div class="modal-label">漏洞证据 / 源码片段</div>
                         <div class="code-block">{{ selectedFinding.evidence }}</div>
                       </div>
+                      <div class="modal-section" v-if="selectedFinding.instances && selectedFinding.instances.length">
+                        <div class="modal-label">命中位置</div>
+                        <div class="instance-list">
+                          <div class="instance-item" v-for="(item, idx) in selectedFinding.instances" :key="'finding-instance-' + idx">
+                            <div class="instance-meta">
+                              <span v-if="item.url">{{ item.url }}</span>
+                              <span>第 {{ item.line || '-' }} 行</span>
+                              <span v-if="item.label">标记：{{ item.label }}</span>
+                            </div>
+                            <div class="code-block">{{ item.snippet }}</div>
+                          </div>
+                        </div>
+                      </div>
+                      <div class="modal-section" v-if="selectedFinding.confidence">
+                        <div class="modal-label">置信度</div>
+                        <div class="modal-value">{{ selectedFinding.confidence }}</div>
+                      </div>
+                      <div class="modal-section" v-if="selectedFinding.final_assessment_reason">
+                        <div class="modal-label">融合判断说明</div>
+                        <div class="modal-value">{{ selectedFinding.final_assessment_reason }}</div>
+                      </div>
                       <div class="modal-section">
                         <div class="modal-label">发现时间</div>
-                        <div class="modal-value">{{ new Date(selectedFinding.created_at).toLocaleString() }}</div>
+                        <div class="modal-value">{{ formatDateTime(selectedFinding.created_at) }}</div>
                       </div>
                       <div class="modal-section">
                         <div class="modal-label">风险分析</div>
                         <div class="modal-value">
-                          <p>此漏洞位于页面：{{ selectedFinding.url }}</p>
+                          <p>涉及页面数量：{{ selectedFinding.page_count || ((selectedFinding.urls && selectedFinding.urls.length) || 1) }}</p>
                           <p>风险类型：{{ selectedFinding.kind }}</p>
                           <p>严重程度：{{ selectedFinding.severity }}</p>
-                          <p>漏洞证据显示，该页面存在未经过滤的用户输入，可能导致攻击者注入恶意脚本。</p>
-                          <p>建议：对所有用户输入进行严格的过滤和转义，使用安全的编码方式处理输出。</p>
+                          <p>{{ selectedFinding.reason || '该页面存在需要进一步复核的潜在风险信号。' }}</p>
+                          <p>建议：{{ selectedFinding.recommendation || '请结合输入来源和输出位置继续确认风险。' }}</p>
                         </div>
+                      </div>
+                    </div>
+
+                    <div v-else-if="selectedAiReport" class="section">
+                      <div class="sectionTitle">AI分析详情</div>
+                      <div class="modal-section">
+                        <div class="modal-label">目标页面</div>
+                        <div class="modal-value mono">{{ selectedAiReport.page_url }}</div>
+                      </div>
+                      <div class="modal-section">
+                        <div class="modal-label">分析时间</div>
+                        <div class="modal-value">{{ formatDateTime(selectedAiReport.created_at) }}</div>
+                      </div>
+                      <div class="modal-section">
+                        <div class="modal-label">分析摘要</div>
+                        <div class="modal-value">{{ selectedAiReport.summary }}</div>
+                      </div>
+                      <div class="modal-section" v-if="selectedAiReport.accuracy">
+                        <div class="modal-label">测试准确性</div>
+                        <div class="modal-value">{{ selectedAiReport.accuracy }}</div>
+                      </div>
+                      <div class="modal-section" v-if="selectedAiReport.risk_assessment">
+                        <div class="modal-label">风险评估</div>
+                        <div class="modal-value">{{ selectedAiReport.risk_assessment }}</div>
+                      </div>
+                      <div class="modal-section" v-if="selectedAiReport.suggestions && selectedAiReport.suggestions.length">
+                        <div class="modal-label">改进建议</div>
+                        <ul class="ai-report-list">
+                          <li v-for="(s, i) in selectedAiReport.suggestions" :key="'detail-ai-suggestion-' + i">{{ s }}</li>
+                        </ul>
+                      </div>
+                      <div class="modal-section" v-if="selectedAiReport.full_report">
+                        <div class="modal-label">详细报告</div>
+                        <div class="ai-report-full">{{ selectedAiReport.full_report }}</div>
+                      </div>
+                    </div>
+
+                    <div v-else-if="selectedVerification" class="section">
+                      <div class="sectionTitle">动态验证详情</div>
+                      <div class="modal-section">
+                        <div class="modal-label">验证结论</div>
+                        <div class="modal-value">{{ selectedVerification.summary }}</div>
+                      </div>
+                      <div class="modal-section">
+                        <div class="modal-label">等级</div>
+                        <div class="modal-value">
+                          <span class="pill" :class="'sev_' + (selectedVerification.level === 'confirmed' ? 'high' : selectedVerification.level === 'suspected' ? 'medium' : 'low')">
+                            {{ selectedVerification.level }}
+                          </span>
+                        </div>
+                      </div>
+                      <div class="modal-section">
+                        <div class="modal-label">来源页面</div>
+                        <div class="modal-value mono">{{ selectedVerification.page_url }}</div>
+                      </div>
+                      <div class="modal-section">
+                        <div class="modal-label">验证目标地址</div>
+                        <div class="modal-value mono">{{ selectedVerification.target_url }}</div>
+                      </div>
+                      <div class="modal-section">
+                        <div class="modal-label">向量 / 参数</div>
+                        <div class="modal-value">{{ selectedVerification.vector }} / {{ selectedVerification.parameter_name || '-' }}</div>
+                      </div>
+                      <div class="modal-section">
+                        <div class="modal-label">验证 Payload</div>
+                        <div class="modal-value mono">{{ selectedVerification.payload }}</div>
+                      </div>
+                      <div class="modal-section">
+                        <div class="modal-label">验证时间</div>
+                        <div class="modal-value">{{ formatDateTime(selectedVerification.created_at) }}</div>
+                      </div>
+                      <div class="modal-section">
+                        <div class="modal-label">风险说明</div>
+                        <div class="modal-value">{{ selectedVerification.risk }}</div>
+                      </div>
+                      <div class="modal-section">
+                        <div class="modal-label">修复建议</div>
+                        <div class="modal-value">{{ selectedVerification.recommendation }}</div>
+                      </div>
+                      <div class="modal-section" v-if="selectedVerification.evidence">
+                        <div class="modal-label">命中证据</div>
+                        <div class="code-block">{{ selectedVerification.evidence }}</div>
                       </div>
                     </div>
 
@@ -616,7 +919,7 @@
                       </div>
                       <div class="modal-section">
                         <div class="modal-label">抓取时间</div>
-                        <div class="modal-value">{{ new Date(selectedPage.fetched_at).toLocaleString() }}</div>
+                        <div class="modal-value">{{ formatDateTime(selectedPage.fetched_at) }}</div>
                       </div>
                       <div class="modal-section">
                         <div class="modal-label">页面分析</div>
@@ -625,6 +928,23 @@
                           <p>内容类型：{{ selectedPage.content_type }}</p>
                           <p>该页面已被扫描，可能存在的XSS漏洞已在发现列表中显示。</p>
                         </div>
+                      </div>
+                      <div class="modal-section" v-if="selectedPageFindings && selectedPageFindings.length">
+                        <div class="modal-label">页面命中风险</div>
+                        <div class="instance-list">
+                          <div class="instance-item" v-for="(finding, idx) in selectedPageFindings" :key="'page-finding-' + idx">
+                            <div class="instance-meta">
+                              <span>{{ finding.title }}</span>
+                              <span>{{ finding.severity }}</span>
+                              <span>{{ finding.instance_count }} 处</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                      <div class="modal-section" v-if="selectedPage.content">
+                        <div class="modal-label">HTML 源码</div>
+                        <div v-if="selectedPageHighlightedHtml" class="source-view" v-html="selectedPageHighlightedHtml"></div>
+                        <div v-else class="code-block">{{ selectedPage.content }}</div>
                       </div>
                     </div>
 
@@ -642,7 +962,15 @@
               <div class="modal">
                 <div class="modal-header">
                   <div class="modal-title">
-                    {{ activeModal.type === 'finding' ? '发现详情' : '页面详情' }}
+                    {{
+                      activeModal.type === 'finding'
+                        ? '发现详情'
+                        : activeModal.type === 'page'
+                          ? '页面详情'
+                          : activeModal.type === 'ai'
+                            ? 'AI分析详情'
+                            : '动态验证详情'
+                    }}
                   </div>
                   <button class="modal-close" @click="closeModal">
                     <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5">
@@ -663,19 +991,135 @@
                       </div>
                     </div>
                     <div class="modal-section">
-                      <div class="modal-label">目标 URL</div>
-                      <div class="modal-value mono">{{ activeModal.data.url }}</div>
+                      <div class="modal-label">涉及页面</div>
+                      <div class="modal-value mono">
+                        <template v-if="activeModal.data.urls && activeModal.data.urls.length">
+                          {{ activeModal.data.urls.join(' | ') }}
+                        </template>
+                        <template v-else>
+                          {{ activeModal.data.url }}
+                        </template>
+                      </div>
                     </div>
                     <div class="modal-section">
                       <div class="modal-label">漏洞证据 / 源码片段</div>
                       <div class="code-block">{{ activeModal.data.evidence }}</div>
                     </div>
+                    <div class="modal-section" v-if="activeModal.data.confidence">
+                      <div class="modal-label">置信度</div>
+                      <div class="modal-value">{{ activeModal.data.confidence }}</div>
+                    </div>
+                    <div class="modal-section" v-if="activeModal.data.reason">
+                      <div class="modal-label">风险说明</div>
+                      <div class="modal-value">{{ activeModal.data.reason }}</div>
+                    </div>
+                    <div class="modal-section" v-if="activeModal.data.recommendation">
+                      <div class="modal-label">修复建议</div>
+                      <div class="modal-value">{{ activeModal.data.recommendation }}</div>
+                    </div>
+                    <div class="modal-section" v-if="activeModal.data.summary">
+                      <div class="modal-label">聚合总结</div>
+                      <div class="modal-value">{{ activeModal.data.summary }}</div>
+                    </div>
+                    <div class="modal-section" v-if="activeModal.data.instances && activeModal.data.instances.length">
+                      <div class="modal-label">命中位置</div>
+                      <div class="instance-list">
+                        <div class="instance-item" v-for="(item, idx) in activeModal.data.instances" :key="'modal-instance-' + idx">
+                          <div class="instance-meta">
+                            <span v-if="item.url">{{ item.url }}</span>
+                            <span>第 {{ item.line || '-' }} 行</span>
+                            <span v-if="item.label">标记：{{ item.label }}</span>
+                          </div>
+                          <div class="code-block">{{ item.snippet }}</div>
+                        </div>
+                      </div>
+                    </div>
                     <div class="modal-section">
                       <div class="modal-label">发现时间</div>
-                      <div class="modal-value">{{ new Date(activeModal.data.created_at).toLocaleString() }}</div>
+                      <div class="modal-value">{{ formatDateTime(activeModal.data.created_at) }}</div>
                     </div>
                   </template>
                   
+                  <template v-else-if="activeModal.type === 'ai'">
+                    <div class="modal-section">
+                      <div class="modal-label">目标页面</div>
+                      <div class="modal-value mono">{{ activeModal.data.page_url }}</div>
+                    </div>
+                    <div class="modal-section">
+                      <div class="modal-label">分析时间</div>
+                      <div class="modal-value">{{ formatDateTime(activeModal.data.created_at) }}</div>
+                    </div>
+                    <div class="modal-section">
+                      <div class="modal-label">分析摘要</div>
+                      <div class="modal-value">{{ activeModal.data.summary }}</div>
+                    </div>
+                    <div class="modal-section" v-if="activeModal.data.accuracy">
+                      <div class="modal-label">测试准确性</div>
+                      <div class="modal-value">{{ activeModal.data.accuracy }}</div>
+                    </div>
+                    <div class="modal-section" v-if="activeModal.data.risk_assessment">
+                      <div class="modal-label">风险评估</div>
+                      <div class="modal-value">{{ activeModal.data.risk_assessment }}</div>
+                    </div>
+                    <div class="modal-section" v-if="activeModal.data.suggestions && activeModal.data.suggestions.length">
+                      <div class="modal-label">改进建议</div>
+                      <ul class="ai-report-list">
+                        <li v-for="(s, i) in activeModal.data.suggestions" :key="'modal-ai-suggestion-' + i">{{ s }}</li>
+                      </ul>
+                    </div>
+                    <div class="modal-section" v-if="activeModal.data.full_report">
+                      <div class="modal-label">详细报告</div>
+                      <div class="ai-report-full">{{ activeModal.data.full_report }}</div>
+                    </div>
+                  </template>
+
+                  <template v-else-if="activeModal.type === 'verification'">
+                    <div class="modal-section">
+                      <div class="modal-label">验证结论</div>
+                      <div class="modal-value">{{ activeModal.data.summary }}</div>
+                    </div>
+                    <div class="modal-section">
+                      <div class="modal-label">等级</div>
+                      <div class="modal-value">
+                        <span class="pill" :class="'sev_' + (activeModal.data.level === 'confirmed' ? 'high' : activeModal.data.level === 'suspected' ? 'medium' : 'low')">
+                          {{ activeModal.data.level }}
+                        </span>
+                      </div>
+                    </div>
+                    <div class="modal-section">
+                      <div class="modal-label">来源页面</div>
+                      <div class="modal-value mono">{{ activeModal.data.page_url }}</div>
+                    </div>
+                    <div class="modal-section">
+                      <div class="modal-label">验证目标地址</div>
+                      <div class="modal-value mono">{{ activeModal.data.target_url }}</div>
+                    </div>
+                    <div class="modal-section">
+                      <div class="modal-label">向量 / 参数</div>
+                      <div class="modal-value">{{ activeModal.data.vector }} / {{ activeModal.data.parameter_name || '-' }}</div>
+                    </div>
+                    <div class="modal-section">
+                      <div class="modal-label">验证 Payload</div>
+                      <div class="modal-value mono">{{ activeModal.data.payload }}</div>
+                    </div>
+                    <div class="modal-section">
+                      <div class="modal-label">风险说明</div>
+                      <div class="modal-value">{{ activeModal.data.risk }}</div>
+                    </div>
+                    <div class="modal-section">
+                      <div class="modal-label">修复建议</div>
+                      <div class="modal-value">{{ activeModal.data.recommendation }}</div>
+                    </div>
+                    <div class="modal-section" v-if="activeModal.data.evidence">
+                      <div class="modal-label">命中证据</div>
+                      <div class="code-block">{{ activeModal.data.evidence }}</div>
+                    </div>
+                    <div class="modal-section">
+                      <div class="modal-label">验证时间</div>
+                      <div class="modal-value">{{ formatDateTime(activeModal.data.created_at) }}</div>
+                    </div>
+                  </template>
+
                   <template v-else-if="activeModal.type === 'page'">
                     <div class="modal-section">
                       <div class="modal-label">页面 URL</div>
@@ -699,11 +1143,11 @@
                     </div>
                     <div class="modal-section">
                       <div class="modal-label">抓取时间</div>
-                      <div class="modal-value">{{ new Date(activeModal.data.fetched_at).toLocaleString() }}</div>
+                      <div class="modal-value">{{ formatDateTime(activeModal.data.fetched_at) }}</div>
                     </div>
-                    <div class="modal-section" v-if="activeModal.data.content">
-                      <div class="modal-label">HTML 源码</div>
-                      <div class="code-block">{{ activeModal.data.content }}</div>
+                    <div class="modal-section">
+                      <div class="modal-label">查看提示</div>
+                      <div class="modal-value">普通视图下仅展示页面概要，切换到详细视图后可查看完整源码和更多信息。</div>
                     </div>
                   </template>
                 </div>

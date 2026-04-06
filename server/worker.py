@@ -5,33 +5,31 @@
 from __future__ import annotations
 
 import multiprocessing as mp
-import os
-import importlib
 import logging
 import threading
 import time
 from dataclasses import dataclass
 from typing import Any
 
+from app_config import get, get_bool, get_int
 from scrapy import signals
 from scrapy.crawler import CrawlerProcess
-from scrapy.settings import Settings
-
-from server.spider import DeepSpider
-from server.worker_context import init_worker, push_event, get_stop_requested
-
-
 from scrapy.http import HtmlResponse
+from scrapy.settings import Settings
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options as ChromeOptions
 from selenium.webdriver.firefox.options import Options as FirefoxOptions
+
+from server.spider import DeepSpider
+from server.worker_context import get_stop_requested, init_worker, push_event
 
 
 class SeleniumMiddleware:
     """Scrapy 中间件：使用 Selenium 渲染页面"""
 
-    def __init__(self, timeout=20):
-        self.timeout = timeout
+    def __init__(self, timeout: int | None = None):
+        self.timeout = timeout or get_int("SELENIUM_TIMEOUT", 20)
+        self.wait_seconds = get_int("SELENIUM_WAIT_SECONDS", 2)
         self.driver = None
 
     def _init_driver(self):
@@ -70,14 +68,14 @@ class SeleniumMiddleware:
             self._init_driver()
             spider.logger.debug(f"Selenium 正在渲染: {request.url}")
             self.driver.get(request.url)
-            # 等待一段固定时间确保脚本执行（实际生产中可使用 WebDriverWait）
-            time.sleep(2)
-            body = self.driver.page_source
+            time.sleep(self.wait_seconds)
+            body = (self.driver.page_source or "").encode("utf-8", "ignore")
             return HtmlResponse(
                 self.driver.current_url,
                 body=body,
                 encoding="utf-8",
-                request=request
+                request=request,
+                headers={"Content-Type": "text/html; charset=utf-8"},
             )
         except Exception as e:
             spider.logger.error(f"Selenium 渲染失败: {e}")
@@ -98,11 +96,8 @@ class LogPushExtension:
     def from_crawler(cls, crawler):
         ext = cls()
         crawler.signals.connect(ext.spider_opened, signal=signals.spider_opened)
-        # 设置 logging handler
         handler = LogPushHandler(crawler.spider)
         logging.getLogger().addHandler(handler)
-        
-        # 启动停止监控线程
         t = threading.Thread(target=ext._stop_monitor, args=(crawler,), daemon=True)
         t.start()
         return ext
@@ -118,21 +113,6 @@ class LogPushExtension:
                     crawler.engine.stop()
                 break
             time.sleep(1.0)
-
-
-class LogPushExtension:
-    """Scrapy 扩展：捕获 Scrapy 日志并推送到前端"""
-
-    @classmethod
-    def from_crawler(cls, crawler):
-        ext = cls()
-        crawler.signals.connect(ext.spider_opened, signal=signals.spider_opened)
-        return ext
-
-    def spider_opened(self, spider):
-        # 在爬虫打开时设置日志处理器
-        handler = LogPushHandler(spider)
-        logging.getLogger().addHandler(handler)
 
 
 class LogPushHandler(logging.Handler):
@@ -163,60 +143,27 @@ class JobSpec:
 def run_worker(job: JobSpec, out_queue: mp.Queue, stop_event: mp.Event) -> None:
     init_worker(out_queue=out_queue, stop_event=stop_event)
     push_event(job.job_id, "log", {"message": "worker started"})
+    logging.getLogger("selenium").setLevel(logging.WARNING)
+    logging.getLogger("urllib3").setLevel(logging.WARNING)
+    logging.getLogger("WDM").setLevel(logging.WARNING)
 
-    app_settings = _settings_module()
     settings = Settings()
-    cache_dir = _get(app_settings, "SCRAPY_HTTPCACHE_DIR", os.getenv("SCRAPY_HTTPCACHE_DIR", ".httpcache"))
-    settings.set("HTTPCACHE_DIR", cache_dir, priority="project")
-    settings.set(
-        "USER_AGENT",
-        _get(app_settings, "CRAWLER_USER_AGENT", os.getenv("CRAWLER_USER_AGENT", "server-crawler/0.1")),
-        priority="project",
-    )
-
-    settings.set(
-        "ROBOTSTXT_OBEY",
-        _get_bool(app_settings, "CRAWLER_ROBOTSTXT_OBEY", bool(int(os.getenv("CRAWLER_ROBOTSTXT_OBEY", "1")))),
-        priority="project",
-    )
-    settings.set(
-        "CONCURRENT_REQUESTS",
-        _get_int(app_settings, "CRAWLER_CONCURRENT_REQUESTS", int(os.getenv("CRAWLER_CONCURRENT_REQUESTS", "16"))),
-        priority="project",
-    )
+    settings.set("HTTPCACHE_DIR", str(get("SCRAPY_HTTPCACHE_DIR", ".scrapy/.httpcache")), priority="project")
+    settings.set("USER_AGENT", str(get("CRAWLER_USER_AGENT", "server-crawler/0.1")), priority="project")
+    settings.set("ROBOTSTXT_OBEY", get_bool("CRAWLER_ROBOTSTXT_OBEY", True), priority="project")
+    settings.set("CONCURRENT_REQUESTS", get_int("CRAWLER_CONCURRENT_REQUESTS", 16), priority="project")
     settings.set(
         "CONCURRENT_REQUESTS_PER_DOMAIN",
-        _get_int(
-            app_settings,
-            "CRAWLER_CONCURRENT_REQUESTS_PER_DOMAIN",
-            int(os.getenv("CRAWLER_CONCURRENT_REQUESTS_PER_DOMAIN", "8")),
-        ),
+        get_int("CRAWLER_CONCURRENT_REQUESTS_PER_DOMAIN", 8),
         priority="project",
     )
-    settings.set(
-        "DOWNLOAD_TIMEOUT",
-        _get_int(app_settings, "CRAWLER_DOWNLOAD_TIMEOUT", int(os.getenv("CRAWLER_DOWNLOAD_TIMEOUT", "20"))),
-        priority="project",
-    )
-    settings.set(
-        "RETRY_TIMES",
-        _get_int(app_settings, "CRAWLER_RETRY_TIMES", int(os.getenv("CRAWLER_RETRY_TIMES", "2"))),
-        priority="project",
-    )
-
-    # 启用自定义 Log Handler 将 Scrapy 日志推送到前端
+    settings.set("DOWNLOAD_TIMEOUT", get_int("CRAWLER_DOWNLOAD_TIMEOUT", 20), priority="project")
+    settings.set("RETRY_TIMES", get_int("CRAWLER_RETRY_TIMES", 2), priority="project")
     settings.set("LOG_ENABLED", True, priority="project")
-    settings.set("LOG_LEVEL", "DEBUG", priority="project")
-    settings.set(
-        "EXTENSIONS",
-        {"server.worker.LogPushExtension": 100},
-        priority="project",
-    )
-    settings.set(
-        "DOWNLOADER_MIDDLEWARES",
-        {"server.worker.SeleniumMiddleware": 800},
-        priority="project",
-    )
+    settings.set("LOG_LEVEL", str(get("SCRAPY_LOG_LEVEL", "DEBUG")), priority="project")
+    settings.set("EXTENSIONS", {"server.worker.LogPushExtension": 100}, priority="project")
+    if get_bool("SELENIUM_ENABLED", True):
+        settings.set("DOWNLOADER_MIDDLEWARES", {"server.worker.SeleniumMiddleware": 800}, priority="project")
 
     process = CrawlerProcess(settings=settings)
     process.crawl(
@@ -242,42 +189,3 @@ def parse_job_spec(payload: dict[str, Any]) -> JobSpec:
         max_pages=int(payload["max_pages"]),
         use_selenium=bool(payload.get("use_selenium", False)),
     )
-
-
-def _settings_module() -> Any | None:
-    try:
-        return importlib.import_module("settings")
-    except Exception:
-        return None
-
-
-def _get(mod: Any | None, name: str, default: Any) -> Any:
-    if name in os.environ:
-        return os.environ[name]
-    if mod is not None and hasattr(mod, name):
-        return getattr(mod, name)
-    return default
-
-
-def _get_int(mod: Any | None, name: str, default: int) -> int:
-    v = _get(mod, name, None)
-    if v is None or v == "":
-        return default
-    try:
-        return int(v)
-    except Exception:
-        return default
-
-
-def _get_bool(mod: Any | None, name: str, default: bool) -> bool:
-    v = _get(mod, name, None)
-    if v is None or v == "":
-        return default
-    if isinstance(v, bool):
-        return v
-    s = str(v).strip().lower()
-    if s in {"1", "true", "yes", "y", "on"}:
-        return True
-    if s in {"0", "false", "no", "n", "off"}:
-        return False
-    return default

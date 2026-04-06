@@ -1,7 +1,4 @@
-"""
-数据库模型模块
-作用：定义数据库表结构，包括任务 (Job)、页面 (Page)、发现记录 (Finding) 和日志 (Log)。
-"""
+"""数据库模型定义。"""
 from __future__ import annotations
 
 import enum
@@ -43,7 +40,7 @@ class Page(db.Model):
     url = db.Column(db.Text, nullable=False)
     status_code = db.Column(db.Integer, nullable=True)
     content_type = db.Column(db.String(255), nullable=True)
-    content = db.Column(db.Text, nullable=True)  # 保存HTML源码
+    content = db.Column(db.Text, nullable=True)
     sha256 = db.Column(db.String(64), nullable=True)
     fetched_at = db.Column(db.DateTime, nullable=False, default=datetime.now)
 
@@ -75,13 +72,42 @@ class AIReport(db.Model):
 
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     job_id = db.Column(db.String(36), index=True, nullable=False)
-    page_id = db.Column(db.Integer, index=True, nullable=False)  # 关联Page表
+    page_id = db.Column(db.Integer, index=True, nullable=False)
     page_url = db.Column(db.Text, nullable=False)
     summary = db.Column(db.Text, nullable=False)
     accuracy = db.Column(db.Text, nullable=True)
-    false_positives = db.Column(db.Text, nullable=True)  # JSON格式存储
-    false_negatives = db.Column(db.Text, nullable=True)  # JSON格式存储
-    suggestions = db.Column(db.Text, nullable=True)  # JSON格式存储
+    false_positives = db.Column(db.Text, nullable=True)
+    false_negatives = db.Column(db.Text, nullable=True)
+    suggestions = db.Column(db.Text, nullable=True)
     risk_assessment = db.Column(db.Text, nullable=True)
     full_report = db.Column(db.Text, nullable=False)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.now)
+
+
+class DynamicVerification(db.Model):
+    __tablename__ = "dynamic_verifications"
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    job_id = db.Column(db.String(36), index=True, nullable=False)
+    page_id = db.Column(db.Integer, index=True, nullable=True)
+    page_url = db.Column(db.Text, nullable=False)
+    target_url = db.Column(db.Text, nullable=False)
+    vector = db.Column(db.String(32), nullable=False)
+    parameter_name = db.Column(db.String(128), nullable=True)
+    payload = db.Column(db.Text, nullable=False)
+    status = db.Column(db.String(32), nullable=False)
+    evidence = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.now)
+
+
+class FindingStatus(db.Model):
+    __tablename__ = "finding_statuses"
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    job_id = db.Column(db.String(36), index=True, nullable=False)
+    finding_kind = db.Column(db.String(64), nullable=False)
+    finding_title = db.Column(db.String(255), nullable=False)
+    status = db.Column(db.String(32), nullable=False, default="open")
+    note = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.now)
+    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)

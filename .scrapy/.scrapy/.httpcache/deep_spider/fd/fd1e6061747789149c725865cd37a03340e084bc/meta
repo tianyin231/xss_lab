@@ -1,0 +1,1 @@
+{'url': 'https://ctf.aabyss.cn/xss-labs/level1.php?name=test', 'method': 'GET', 'status': 200, 'response_url': 'https://ctf.aabyss.cn/xss-labs/level1.php?name=test', 'timestamp': 1775482471.8056662}

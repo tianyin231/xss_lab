@@ -11,6 +11,8 @@ import sys
 import time
 from typing import Sequence
 
+from app_config import get, get_int
+
 
 def main(argv: Sequence[str]) -> int:
     root = os.path.dirname(os.path.abspath(__file__))
@@ -20,9 +22,21 @@ def main(argv: Sequence[str]) -> int:
     )
 
     backend_cmd = [sys.executable, os.path.join(root, "run_dev.py")]
-    frontend_port = str(env.get("FRONTEND_PORT") or "5173")
-    frontend_dir = env.get("FRONTEND_DIR") or os.path.join(root, "web")
-    frontend_cmd = [sys.executable, "-m", "http.server", frontend_port, "--directory", frontend_dir]
+    frontend_host = str(get("FRONTEND_HOST", "127.0.0.1"))
+    frontend_port = str(get_int("FRONTEND_PORT", 5173))
+    frontend_dir = str(get("FRONTEND_DIR", os.path.join(root, "web")))
+    if not os.path.isabs(frontend_dir):
+        frontend_dir = os.path.join(root, frontend_dir)
+    frontend_cmd = [
+        sys.executable,
+        "-m",
+        "http.server",
+        frontend_port,
+        "--bind",
+        frontend_host,
+        "--directory",
+        frontend_dir,
+    ]
 
     # 跨平台进程创建：Windows使用start_new_session，Unix使用setsid
     if os.name == 'nt':  # Windows系统

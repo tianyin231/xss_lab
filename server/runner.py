@@ -12,9 +12,11 @@ from typing import Any
 
 from flask import current_app
 
+from app_config import get_bool
 from server.db import db
+from server.dynamic_verify import run_dynamic_verification
 from server.events import EventBus
-from server.models import Finding, Job, JobStatus, Log, Page
+from server.models import DynamicVerification, Finding, Job, JobStatus, Log, Page
 from server.worker import parse_job_spec, run_worker
 
 
@@ -137,6 +139,14 @@ class JobRunner:
                 elif msg_type == "done":
                     self._persist_log(job_id, {"message": "done"})
                     self._bus.publish(job_id, "log", {"message": "done"})
+                    if get_bool("DYNAMIC_VERIFY_ENABLED", False):
+                        try:
+                            run_dynamic_verification(
+                                job_id,
+                                log=lambda message: self._persist_dynamic_log(job_id, message),
+                            )
+                        except Exception as exc:
+                            self._persist_dynamic_log(job_id, f"[动态验证] 执行失败: {exc}")
                     self._finalize_if_needed(job_id=job_id, status=JobStatus.finished.value, error=None)
                     return
                 else:
@@ -177,6 +187,10 @@ class JobRunner:
         )
         db.session.add(log)
         db.session.commit()
+
+    def _persist_dynamic_log(self, job_id: str, message: str) -> None:
+        self._persist_log(job_id, {"message": message})
+        self._bus.publish(job_id, "log", {"message": message})
 
     def _finalize_if_needed(self, job_id: str, status: str, error: str | None) -> None:
         job: Job | None = db.session.get(Job, job_id)

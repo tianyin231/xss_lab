@@ -1,0 +1,21 @@
+<!DOCTYPE html><!--STATUS OK--><html>
+<head>
+<meta http-equiv="content-type" content="text/html;charset=utf-8">
+<script>
+window.alert = function()  
+{     
+confirm("完成的不错！");
+ window.location.href="level2.php?keyword=test"; 
+}
+</script>
+<title>欢迎来到level1</title>
+</head>
+<body>
+<h1 align=center>欢迎来到level1</h1>
+<h2 align=center>欢迎用户test</h2><center><img src=level1.png></center>
+<h3 align=center>payload的长度:4</h3></body>
+</html>
+
+
+
+

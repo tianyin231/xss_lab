@@ -1,27 +1,21 @@
-"""
-API 接口模块
-作用：定义所有前后端交互的 RESTful 接口，包括任务管理、报告查询和实时日志流。
-"""
+"""HTTP API 路由。"""
 from __future__ import annotations
 
-import importlib
-import os
-from typing import Any
-
-from flask import Blueprint, Response, jsonify, request
-
 import json
+from collections import Counter
+from datetime import datetime, timedelta, timezone
+
+from ai import get_analyzer
+from app_config import get_bool, get_int
+from flask import Blueprint, Response, jsonify, request
+from sqlalchemy import func
 
 from server.db import db
-from server.models import Finding, Job, Log, Page, AIReport
+from server.models import AIReport, DynamicVerification, Finding, FindingStatus, Job, Log, Page
 from server.runner import bus, runner
-from ai import get_analyzer
-from datetime import datetime
 
 api_bp = Blueprint("api", __name__)
-
-_SETTINGS: Any | None = None
-_SETTINGS_LOADED = False
+BEIJING_TZ = timezone(timedelta(hours=8))
 
 
 @api_bp.get("")
@@ -34,9 +28,9 @@ def api_root() -> Response:
 def create_job() -> Response:
     payload = request.get_json(force=True, silent=True) or {}
     target_url = str(payload.get("target_url") or "").strip()
-    max_depth = int(payload.get("max_depth") or _get_int("MAX_DEPTH_DEFAULT", 2))
-    max_pages = int(payload.get("max_pages") or _get_int("MAX_PAGES_DEFAULT", 200))
-    use_selenium = bool(payload.get("use_selenium") or _get_bool("USE_SELENIUM_DEFAULT", False))
+    max_depth = int(payload.get("max_depth") or get_int("MAX_DEPTH_DEFAULT", 2))
+    max_pages = int(payload.get("max_pages") or get_int("MAX_PAGES_DEFAULT", 200))
+    use_selenium = bool(payload.get("use_selenium") or get_bool("USE_SELENIUM_DEFAULT", False))
 
     if not target_url:
         return jsonify({"error": "target_url required"}), 400
@@ -64,9 +58,9 @@ def list_jobs() -> Response:
                 "use_selenium": bool(j.use_selenium),
                 "status": j.status,
                 "error": j.error,
-                "created_at": j.created_at.isoformat() + "Z",
-                "started_at": j.started_at.isoformat() + "Z" if j.started_at else None,
-                "finished_at": j.finished_at.isoformat() + "Z" if j.finished_at else None,
+                "created_at": _to_beijing_iso(j.created_at),
+                "started_at": _to_beijing_iso(j.started_at),
+                "finished_at": _to_beijing_iso(j.finished_at),
             }
             for j in jobs
         ]
@@ -87,9 +81,9 @@ def get_job(job_id: str) -> Response:
             "use_selenium": bool(job.use_selenium),
             "status": job.status,
             "error": job.error,
-            "created_at": job.created_at.isoformat() + "Z",
-            "started_at": job.started_at.isoformat() + "Z" if job.started_at else None,
-            "finished_at": job.finished_at.isoformat() + "Z" if job.finished_at else None,
+            "created_at": _to_beijing_iso(job.created_at),
+            "started_at": _to_beijing_iso(job.started_at),
+            "finished_at": _to_beijing_iso(job.finished_at),
         }
     )
 
@@ -106,19 +100,63 @@ def delete_job(job_id: str) -> Response:
     if job is None:
         return jsonify({"error": "not found"}), 404
 
-    # Stop if running
     runner.stop_job(job_id)
-
-    # Delete related data
-    from server.models import Finding, Log, Page, AIReport
     Page.query.filter_by(job_id=job_id).delete()
     Finding.query.filter_by(job_id=job_id).delete()
     Log.query.filter_by(job_id=job_id).delete()
     AIReport.query.filter_by(job_id=job_id).delete()
+    DynamicVerification.query.filter_by(job_id=job_id).delete()
+    FindingStatus.query.filter_by(job_id=job_id).delete()
     db.session.delete(job)
     db.session.commit()
-
     return jsonify({"ok": True})
+
+
+@api_bp.post("/jobs/<job_id>/finding-status")
+def update_finding_status(job_id: str) -> Response:
+    job: Job | None = db.session.get(Job, job_id)
+    if job is None:
+        return jsonify({"error": "not found"}), 404
+
+    payload = request.get_json(force=True, silent=True) or {}
+    finding_kind = str(payload.get("kind") or "").strip()
+    finding_title = str(payload.get("title") or "").strip()
+    status = str(payload.get("status") or "open").strip().lower()
+    note = str(payload.get("note") or "").strip() or None
+    allowed_statuses = {"open", "confirmed", "false_positive", "fixed", "ignored"}
+
+    if not finding_kind or not finding_title:
+        return jsonify({"error": "kind and title required"}), 400
+    if status not in allowed_statuses:
+        return jsonify({"error": "invalid status"}), 400
+
+    record = FindingStatus.query.filter_by(
+        job_id=job_id,
+        finding_kind=finding_kind,
+        finding_title=finding_title,
+    ).first()
+    if record is None:
+        record = FindingStatus(
+            job_id=job_id,
+            finding_kind=finding_kind,
+            finding_title=finding_title,
+            status=status,
+            note=note,
+        )
+        db.session.add(record)
+    else:
+        record.status = status
+        record.note = note
+
+    db.session.commit()
+    return jsonify(
+        {
+            "ok": True,
+            "status": record.status,
+            "note": record.note,
+            "updated_at": _to_beijing_iso(record.updated_at),
+        }
+    )
 
 
 @api_bp.get("/jobs/<job_id>/report")
@@ -127,19 +165,20 @@ def get_report(job_id: str) -> Response:
     if job is None:
         return jsonify({"error": "not found"}), 404
 
-    # 使用聚合查询获取统计信息，避免加载所有数据
-    from sqlalchemy import func
     pages_count = db.session.query(func.count(Page.id)).filter_by(job_id=job_id).scalar() or 0
-    findings_count = db.session.query(func.count(Finding.id)).filter_by(job_id=job_id).scalar() or 0
-
-    # 只获取最近的页面、发现和日志，减少数据传输
-    pages = Page.query.filter_by(job_id=job_id).order_by(Page.id.desc()).limit(100).all()
-    findings = Finding.query.filter_by(job_id=job_id).order_by(Finding.id.desc()).limit(100).all()
+    raw_findings = Finding.query.filter_by(job_id=job_id).order_by(Finding.id.asc()).all()
     logs = Log.query.filter_by(job_id=job_id).order_by(Log.id.desc()).limit(500).all()
+    pages = Page.query.filter_by(job_id=job_id).order_by(Page.id.desc()).limit(100).all()
+    verifications = DynamicVerification.query.filter_by(job_id=job_id).order_by(DynamicVerification.id.asc()).all()
+    status_records = FindingStatus.query.filter_by(job_id=job_id).all()
 
-    # 反转顺序，使最新的在最后
+    grouped_findings = _build_grouped_findings(raw_findings, verifications, status_records)
+    severity_stats = Counter(item["severity"] for item in grouped_findings)
+    kind_stats = Counter(item["kind"] for item in grouped_findings)
+    page_risk = _top_risk_pages(grouped_findings)
+    verification_stats = Counter(item.status for item in verifications)
+
     pages.reverse()
-    findings.reverse()
     logs.reverse()
 
     return jsonify(
@@ -149,13 +188,45 @@ def get_report(job_id: str) -> Response:
                 "target_url": job.target_url,
                 "status": job.status,
                 "error": job.error,
-                "created_at": job.created_at.isoformat() + "Z",
-                "started_at": job.started_at.isoformat() + "Z" if job.started_at else None,
-                "finished_at": job.finished_at.isoformat() + "Z" if job.finished_at else None,
+                "created_at": _to_beijing_iso(job.created_at),
+                "started_at": _to_beijing_iso(job.started_at),
+                "finished_at": _to_beijing_iso(job.finished_at),
             },
             "stats": {
                 "pages": pages_count,
-                "findings": findings_count,
+                "findings": len(grouped_findings),
+                "instances": len(raw_findings),
+                "severity": dict(severity_stats),
+                "by_kind": dict(kind_stats),
+            },
+            "summary": {
+                "top_risk_pages": page_risk,
+            },
+            "dynamic_verification": {
+                "enabled": get_bool("DYNAMIC_VERIFY_ENABLED", False),
+                "stats": dict(verification_stats),
+                "results": [
+                    {
+                        "id": item.id,
+                        "page_id": item.page_id,
+                        "page_url": item.page_url,
+                        "target_url": item.target_url,
+                        "vector": item.vector,
+                        "parameter_name": item.parameter_name,
+                        "payload": item.payload,
+                        "status": item.status,
+                        "evidence": _parse_dynamic_evidence(item.evidence)["detail"],
+                        "engine": _parse_dynamic_evidence(item.evidence)["engine"],
+                        "created_at": _to_beijing_iso(item.created_at),
+                        **_explain_dynamic_verification(
+                            item.vector,
+                            item.status,
+                            item.parameter_name,
+                            _parse_dynamic_evidence(item.evidence)["detail"],
+                        ),
+                    }
+                    for item in verifications
+                ],
             },
             "pages": [
                 {
@@ -164,28 +235,12 @@ def get_report(job_id: str) -> Response:
                     "status_code": p.status_code,
                     "content_type": p.content_type,
                     "sha256": p.sha256,
-                    "fetched_at": p.fetched_at.isoformat() + "Z",
+                    "fetched_at": _to_beijing_iso(p.fetched_at),
                 }
                 for p in pages
             ],
-            "findings": [
-                {
-                    "url": f.url,
-                    "kind": f.kind,
-                    "severity": f.severity,
-                    "title": f.title,
-                    "evidence": f.evidence,
-                    "created_at": f.created_at.isoformat() + "Z",
-                }
-                for f in findings
-            ],
-            "logs": [
-                {
-                    "message": l.message,
-                    "ts": l.created_at.timestamp(),
-                }
-                for l in logs
-            ],
+            "findings": grouped_findings,
+            "logs": [{"message": l.message, "ts": _to_beijing_ts(l.created_at)} for l in logs],
         }
     )
 
@@ -203,275 +258,490 @@ def job_events(job_id: str) -> Response:
 
 @api_bp.post("/jobs/<job_id>/analyze")
 def analyze_job(job_id: str) -> Response:
-    """分析任务结果，生成AI报告"""
-    print(f"[DEBUG] 调用analyze_job函数，job_id={job_id}")
     job: Job | None = db.session.get(Job, job_id)
     if job is None:
-        print(f"[DEBUG] 任务不存在，job_id={job_id}")
         return jsonify({"error": "not found"}), 404
-    
-    # 记录开始分析日志
-    log = Log(
-        job_id=job_id,
-        message="[AI分析] 开始分析任务"
-    )
-    db.session.add(log)
-    print(f"[DEBUG] 记录开始分析日志")
-    
-    # 获取任务的页面和发现
+
     pages = Page.query.filter_by(job_id=job_id).all()
     findings = Finding.query.filter_by(job_id=job_id).all()
-    
     if not pages:
-        # 记录错误日志
-        error_log = Log(
-            job_id=job_id,
-            message="[AI分析] 分析失败：没有找到页面"
-        )
-        db.session.add(error_log)
+        db.session.add(Log(job_id=job_id, message="[AI分析] 分析失败：没有找到可分析页面"))
         db.session.commit()
         return jsonify({"error": "no pages found"}), 400
-    
-    # 记录分析页面数量
-    page_count_log = Log(
-        job_id=job_id,
-        message=f"[AI分析] 开始分析 {len(pages)} 个页面"
-    )
-    db.session.add(page_count_log)
-    
-    # 分析每个页面
+
+    db.session.add(Log(job_id=job_id, message=f"[AI分析] 开始分析任务，共 {len(pages)} 个页面"))
     reports = []
-    
+    analyzer = get_analyzer()
+
     for page in pages:
-        # 构建测试结果
         page_findings = [f for f in findings if f.url == page.url]
         test_result = {
             "url": page.url,
             "status_code": page.status_code,
-            "findings": [{
-                "kind": f.kind,
-                "severity": f.severity,
-                "title": f.title,
-                "evidence": f.evidence
-            } for f in page_findings]
-        }
-        
-        # 记录开始分析页面日志
-        page_start_log = Log(
-            job_id=job_id,
-            message=f"[AI分析] 开始分析页面：{page.url}"
-        )
-        db.session.add(page_start_log)
-        
-        # 这里应该获取页面的HTML内容，暂时使用模拟数据
-        html = f"<html><body><h1>Test Page</h1><p>This is a test page for {page.url}</p></body></html>"
-        
-        try:
-            # 构建分析提示
-            prompt = f"你是一位网络安全专家，负责分析XSS测试结果。\n\n请分析以下HTML内容和测试结果，判断测试结果是否准确，并给出详细的分析报告。\n\nHTML内容：\n{html[:2000]}...\n\n测试结果：\n{json.dumps(test_result, indent=2)}\n\n分析要求：\n1. 评估测试结果的准确性\n2. 分析可能的误报或漏报\n3. 提供改进测试的建议\n4. 给出安全风险评估\n5. 生成一份结构化的分析报告"
-            
-            # 调用DeepSeek API
-            import httpx
-            url = "https://api.deepseek.com/v1/chat/completions"
-            api_key = "sk-130bf79101914f0cac13672bba65ad0b"
-            headers = {
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json"
-            }
-            payload = {
-                "model": "deepseek-chat",
-                "messages": [
-                    {"role": "system", "content": "你是一位网络安全专家，精通XSS漏洞分析。"},
-                    {"role": "user", "content": prompt}
-                ],
-                "temperature": 0.3,
-                "max_tokens": 2000
-            }
-            
-            print(f"[DEBUG] 调用DeepSeek API: {url}")
-            print(f"[DEBUG] 请求头: {headers}")
-            print(f"[DEBUG] 请求体大小: {len(str(payload))} 字符")
-            
-            # 发送请求
-            with httpx.Client(timeout=60.0) as client:
-                response = client.post(url, headers=headers, json=payload)
-                
-            print(f"[DEBUG] 响应状态码: {response.status_code}")
-            print(f"[DEBUG] 响应内容: {response.text[:500]}...")
-            
-            # 检查响应状态
-            response.raise_for_status()
-            api_response = response.json()
-            
-            # 处理API响应
-            content = api_response["choices"][0]["message"]["content"]
-            
-            # 构建分析结果
-            analysis = {
-                "success": True,
-                "analysis": {
-                    "summary": content[:500] + "..." if len(content) > 500 else content,
-                    "accuracy": "",
-                    "false_positives": [],
-                    "false_negatives": [],
-                    "suggestions": [],
-                    "risk_assessment": "",
-                    "full_report": content
+            "findings": [
+                {
+                    "kind": f.kind,
+                    "severity": f.severity,
+                    "title": f.title,
+                    "evidence": f.evidence,
                 }
-            }
-            
-            # 记录分析成功日志
-            page_success_log = Log(
-                job_id=job_id,
-                message=f"[AI分析] 页面分析成功：{page.url}"
-            )
-            db.session.add(page_success_log)
-            
-            # 保存AI报告到数据库
+                for f in page_findings
+            ],
+        }
+
+        db.session.add(Log(job_id=job_id, message=f"[AI分析] 开始分析页面：{page.url}"))
+        try:
+            analysis = analyzer.analyze_xss_result(page.content or "", test_result)
+            if not analysis.get("success"):
+                raise RuntimeError(str(analysis.get("error") or "AI analysis failed"))
+
+            result = analysis["analysis"]
             ai_report = AIReport(
                 job_id=job_id,
-                page_id=page.id,  # 关联Page表
+                page_id=page.id,
                 page_url=page.url,
-                summary=analysis["analysis"]["summary"],
-                accuracy=analysis["analysis"]["accuracy"],
-                false_positives=json.dumps(analysis["analysis"]["false_positives"]),
-                false_negatives=json.dumps(analysis["analysis"]["false_negatives"]),
-                suggestions=json.dumps(analysis["analysis"]["suggestions"]),
-                risk_assessment=analysis["analysis"]["risk_assessment"],
-                full_report=analysis["analysis"]["full_report"]
+                summary=result["summary"],
+                accuracy=result.get("accuracy"),
+                false_positives=json.dumps(result.get("false_positives") or [], ensure_ascii=False),
+                false_negatives=json.dumps(result.get("false_negatives") or [], ensure_ascii=False),
+                suggestions=json.dumps(result.get("suggestions") or [], ensure_ascii=False),
+                risk_assessment=result.get("risk_assessment"),
+                full_report=result["full_report"],
             )
             db.session.add(ai_report)
+            db.session.add(Log(job_id=job_id, message=f"[AI分析] 页面分析成功：{page.url}"))
             reports.append(analysis)
         except Exception as e:
-            # 记录分析失败日志
-            page_error_log = Log(
-                job_id=job_id,
-                message=f"[AI分析] 页面分析失败：{page.url} - {str(e)}"
-            )
-            db.session.add(page_error_log)
-            
-            # 生成默认分析结果
-            default_analysis = {
+            db.session.add(Log(job_id=job_id, message=f"[AI分析] 页面分析失败：{page.url} - {str(e)}"))
+            fallback_analysis = {
                 "success": True,
                 "analysis": {
-                    "summary": "API调用失败，使用默认分析结果。基于提供的HTML内容和测试结果，我分析了潜在的XSS漏洞。",
-                    "accuracy": "测试结果准确性评估：中等",
-                    "false_positives": ["某些测试可能存在误报，需要进一步验证"],
-                    "false_negatives": ["可能存在未检测到的XSS漏洞"],
-                    "suggestions": ["增加更多的测试用例", "使用更复杂的payload", "检查DOM-based XSS漏洞"],
-                    "risk_assessment": "风险等级：中等。虽然发现了一些潜在的XSS漏洞，但它们的利用难度较高。",
-                    "full_report": f"# XSS漏洞分析报告\n\n## 分析摘要\nAPI调用失败，使用默认分析结果。基于提供的HTML内容和测试结果，我分析了潜在的XSS漏洞。\n\n## 测试准确性\n测试结果的准确性评估为中等，可能存在一些误报和漏报。\n\n## 潜在问题\n- 可能存在未检测到的DOM-based XSS漏洞\n- 某些测试用例可能过于简单\n\n## 改进建议\n1. 增加更多的测试用例\n2. 使用更复杂的payload\n3. 检查DOM-based XSS漏洞\n4. 考虑不同浏览器的兼容性\n\n## 风险评估\n风险等级：中等\n虽然发现了一些潜在的XSS漏洞，但它们的利用难度较高。建议进一步测试和验证。\n\n## 技术细节\n- 分析的URL: {page.url}\n- 发现的漏洞数量: {len(page_findings)}\n- HTML长度: {len(html)} 字符\n- API调用错误: {str(e)}"
-                }
+                    "summary": f"AI analysis failed for {page.url}",
+                    "accuracy": "unknown",
+                    "false_positives": ["当前未生成模型报告，无法判断误报情况"],
+                    "false_negatives": ["当前未生成模型报告，无法判断是否遗漏 XSS 风险"],
+                    "suggestions": [
+                        "检查 AI_API_KEY 和 AI_BASE_URL 配置",
+                        "确认网络与 TLS 连接是否正常",
+                        "修复上游 AI 服务错误后重新分析",
+                    ],
+                    "risk_assessment": "AI 服务不可用，本次未生成可靠的风险评估。",
+                    "full_report": (
+                        f"AI analysis failed for page: {page.url}\n\n"
+                        f"Error: {e}\n\n"
+                        "No model-generated report was available, so this fallback record was saved."
+                    ),
+                },
             }
-            
-            # 保存默认AI报告到数据库
-            default_ai_report = AIReport(
+
+            fallback_report = AIReport(
                 job_id=job_id,
-                page_id=page.id,  # 关联Page表
+                page_id=page.id,
                 page_url=page.url,
-                summary=default_analysis["analysis"]["summary"],
-                accuracy=default_analysis["analysis"]["accuracy"],
-                false_positives=json.dumps(default_analysis["analysis"]["false_positives"]),
-                false_negatives=json.dumps(default_analysis["analysis"]["false_negatives"]),
-                suggestions=json.dumps(default_analysis["analysis"]["suggestions"]),
-                risk_assessment=default_analysis["analysis"]["risk_assessment"],
-                full_report=default_analysis["analysis"]["full_report"]
+                summary=fallback_analysis["analysis"]["summary"],
+                accuracy=fallback_analysis["analysis"]["accuracy"],
+                false_positives=json.dumps(fallback_analysis["analysis"]["false_positives"], ensure_ascii=False),
+                false_negatives=json.dumps(fallback_analysis["analysis"]["false_negatives"], ensure_ascii=False),
+                suggestions=json.dumps(fallback_analysis["analysis"]["suggestions"], ensure_ascii=False),
+                risk_assessment=fallback_analysis["analysis"]["risk_assessment"],
+                full_report=fallback_analysis["analysis"]["full_report"],
             )
-            db.session.add(default_ai_report)
-            reports.append(default_analysis)
-    
-    # 记录分析完成日志
-    completion_log = Log(
-        job_id=job_id,
-        message=f"[AI分析] 分析完成，生成 {len(reports)} 份报告"
-    )
-    db.session.add(completion_log)
-    
+            db.session.add(fallback_report)
+            reports.append(fallback_analysis)
+
+    db.session.add(Log(job_id=job_id, message=f"[AI分析] 分析完成，生成 {len(reports)} 份报告"))
     db.session.commit()
     return jsonify({"success": True, "reports": reports})
 
 
 @api_bp.get("/jobs/<job_id>/ai-report")
 def get_ai_report(job_id: str) -> Response:
-    """获取AI分析报告"""
     job: Job | None = db.session.get(Job, job_id)
     if job is None:
         return jsonify({"error": "not found"}), 404
-    
-    # 获取AI报告
-    reports = AIReport.query.filter_by(job_id=job_id).all()
-    
-    return jsonify([{
-        "id": r.id,
-        "page_url": r.page_url,
-        "summary": r.summary,
-        "accuracy": r.accuracy,
-        "false_positives": json.loads(r.false_positives) if r.false_positives else [],
-        "false_negatives": json.loads(r.false_negatives) if r.false_negatives else [],
-        "suggestions": json.loads(r.suggestions) if r.suggestions else [],
-        "risk_assessment": r.risk_assessment,
-        "full_report": r.full_report,
-        "created_at": r.created_at.isoformat() + "Z"
-    } for r in reports])
+
+    reports = AIReport.query.filter_by(job_id=job_id).order_by(AIReport.id.asc()).all()
+    return jsonify(
+        [
+            {
+                "id": r.id,
+                "page_url": r.page_url,
+                "summary": r.summary,
+                "accuracy": r.accuracy,
+                "false_positives": json.loads(r.false_positives) if r.false_positives else [],
+                "false_negatives": json.loads(r.false_negatives) if r.false_negatives else [],
+                "suggestions": json.loads(r.suggestions) if r.suggestions else [],
+                "risk_assessment": r.risk_assessment,
+                "full_report": r.full_report,
+                "created_at": _to_beijing_iso(r.created_at),
+            }
+            for r in reports
+        ]
+    )
 
 
 @api_bp.get("/pages/<page_id>")
 def get_page_detail(page_id: int) -> Response:
-    """获取页面详细信息，包括HTML源码"""
     page: Page | None = db.session.get(Page, page_id)
     if page is None:
         return jsonify({"error": "not found"}), 404
-    
-    return jsonify({
-        "id": page.id,
-        "job_id": page.job_id,
-        "url": page.url,
-        "status_code": page.status_code,
-        "content_type": page.content_type,
-        "content": page.content,
-        "sha256": page.sha256,
-        "fetched_at": page.fetched_at.isoformat() + "Z"
-    })
+
+    return jsonify(
+        {
+            "id": page.id,
+            "job_id": page.job_id,
+            "url": page.url,
+            "status_code": page.status_code,
+            "content_type": page.content_type,
+            "content": page.content,
+            "sha256": page.sha256,
+            "fetched_at": _to_beijing_iso(page.fetched_at),
+        }
+    )
 
 
-def _settings_module() -> Any | None:
+def _group_findings(
+    findings: list[Finding],
+    verifications: list[DynamicVerification],
+    status_records: list[FindingStatus],
+) -> list[dict[str, object]]:
+    groups: dict[tuple[str, str], dict[str, object]] = {}
+    for finding in findings:
+        payload = _parse_evidence(finding.evidence)
+        payload["url"] = finding.url
+        family_key, family_title = _finding_family(finding.kind, finding.title, payload)
+        group = groups.setdefault(
+            (family_key, family_title),
+            {
+                "kind": family_key,
+                "severity": finding.severity,
+                "title": family_title,
+                "created_at": _to_beijing_iso(finding.created_at),
+                "instances": [],
+                "urls": set(),
+                "member_kinds": set(),
+            },
+        )
+        group["instances"].append(payload)
+        group["urls"].add(finding.url)
+        group["member_kinds"].add(finding.kind)
+        if _severity_score(finding.severity) > _severity_score(str(group["severity"])):
+            group["severity"] = finding.severity
+
+    status_map = {(item.finding_kind, item.finding_title): item for item in status_records}
+    grouped: list[dict[str, object]] = []
+    for group in groups.values():
+        reason, confidence, recommendation, evidence_type = _explain_finding(group["kind"], group["severity"])
+        instances = sorted(group["instances"], key=lambda item: (item.get("line") or 0, item.get("snippet") or ""))
+        urls = sorted(group["urls"])
+        lines = [str(item["line"]) for item in instances if item.get("line")]
+        summary = f"共命中 {len(instances)} 处，涉及 {len(urls)} 个页面"
+        if lines:
+            summary += f"，行号: {', '.join(lines[:8])}"
+        grouped.append(
+            {
+                "url": urls[0] if urls else "",
+                "urls": urls,
+                "page_count": len(urls),
+                "kind": group["kind"],
+                "member_kinds": sorted(group["member_kinds"]),
+                "severity": group["severity"],
+                "title": group["title"],
+                "summary": summary,
+                "evidence": instances[0].get("snippet") or "",
+                "instances": instances,
+                "instance_count": len(instances),
+                "reason": reason,
+                "confidence": confidence,
+                "recommendation": recommendation,
+                "evidence_type": evidence_type,
+                "created_at": group["created_at"],
+            }
+        )
+
+    return sorted(grouped, key=lambda item: (_severity_score(item["severity"]), item["title"]), reverse=True)
+
+
+def _parse_evidence(raw: str) -> dict[str, object]:
     try:
-        return importlib.import_module("settings")
+        payload = json.loads(raw)
+        if isinstance(payload, dict):
+            return {
+                "line": payload.get("line"),
+                "label": payload.get("label"),
+                "snippet": payload.get("snippet") or raw,
+            }
     except Exception:
+        pass
+    return {"line": None, "label": None, "snippet": raw}
+
+
+def _finding_family(kind: str, title: str, payload: dict[str, object]) -> tuple[str, str]:
+    snippet = str(payload.get("snippet") or "").lower()
+
+    if kind in {"inline_event_handler", "javascript_redirection"} and any(
+        token in snippet for token in ("location.href", "window.location", "location.assign", "location.replace")
+    ):
+        return ("inline_event_navigation", "内联事件跳转风险")
+
+    if kind in {"javascript_protocol", "data_protocol", "iframe_srcdoc"}:
+        return ("executable_attribute", "可执行属性注入风险")
+
+    return (kind, title)
+
+
+def _explain_finding(kind: str, severity: str) -> tuple[str, str, str, str]:
+    if kind == "inline_event_navigation":
+        return (
+            "页面通过内联事件直接触发跳转逻辑，这类写法常与 onclick 拼接脚本或路径混用，风险应整体审视。",
+            "high",
+            "建议把跳转逻辑移到 addEventListener 或受控函数中，避免在 HTML 属性里直接操作 location。",
+            "html_attr",
+        )
+    if kind == "source_sink_flow":
+        return (
+            "页面中同时出现潜在输入源和危险输出点，存在较强的 DOM XSS 风险信号。",
+            "high",
+            "优先检查 URL、Cookie 等数据是否直接流入 innerHTML、document.write 等危险位置。",
+            "flow",
+        )
+    if kind == "dom_sink":
+        return (
+            "页面使用了可直接执行或拼接 HTML 的危险 Sink，若输入可控则可能触发脚本执行。",
+            "high" if severity == "high" else "medium",
+            "优先改用 textContent、setAttribute 等安全写法，避免把未经处理的内容写入 HTML。",
+            "script_snippet",
+        )
+    if kind == "inline_event_handler":
+        return (
+            "页面存在内联事件处理器，这类写法会放大注入后的脚本执行风险。",
+            "high",
+            "建议改用 addEventListener 绑定事件，并避免把动态数据直接拼进事件属性。",
+            "html_attr",
+        )
+    if kind in {"javascript_protocol", "data_protocol", "iframe_srcdoc"}:
+        return (
+            "页面存在可执行协议或 srcdoc 这类高风险属性，通常会直接提升利用可能性。",
+            "high",
+            "建议移除 javascript:、data:text/html、srcdoc 等执行入口，改为普通链接或受控跳转。",
+            "html_attr",
+        )
+    if kind == "tainted_source":
+        return (
+            "页面读取了潜在用户可控输入，但当前尚未确认是否进入危险输出位置。",
+            "low",
+            "继续核查这些输入是否流向 innerHTML、document.write、eval 等危险位置。",
+            "summary",
+        )
+    if kind == "javascript_redirection":
+        return (
+            "页面存在基于 JavaScript 的跳转逻辑，需要确认是否会拼接用户输入导致开放跳转或脚本注入。",
+            "low",
+            "建议统一封装跳转逻辑，并限制 location 赋值来源。",
+            "summary",
+        )
+    if kind == "anomaly":
+        return (
+            "页面脚本标签数量异常偏多，可能增加攻击面，也可能意味着页面逻辑较复杂。",
+            "low",
+            "建议优先复核该页面的脚本加载和动态渲染逻辑。",
+            "summary",
+        )
+    return (
+        "页面存在需要进一步人工复核的潜在风险信号。",
+        "medium",
+        "建议结合页面上下文、输入来源和输出位置继续确认风险。",
+        "summary",
+    )
+
+
+def _top_risk_pages(findings: list[dict[str, object]]) -> list[dict[str, object]]:
+    page_scores: dict[str, dict[str, object]] = {}
+    for finding in findings:
+        score = _severity_score(str(finding["severity"]))
+        bucket = page_scores.setdefault(
+            str(finding["url"]),
+            {"url": finding["url"], "score": 0, "findings": 0, "highest_severity": "low"},
+        )
+        bucket["score"] += score
+        bucket["findings"] += 1
+        if score > _severity_score(str(bucket["highest_severity"])):
+            bucket["highest_severity"] = finding["severity"]
+    return sorted(page_scores.values(), key=lambda item: (-int(item["score"]), -int(item["findings"]), str(item["url"])))[:10]
+
+
+def _build_grouped_findings(
+    findings: list[Finding],
+    verifications: list[DynamicVerification],
+    status_records: list[FindingStatus],
+) -> list[dict[str, object]]:
+    groups: dict[tuple[str, str], dict[str, object]] = {}
+    for finding in findings:
+        payload = _parse_evidence(finding.evidence)
+        payload["url"] = finding.url
+        family_key, family_title = _finding_family(finding.kind, finding.title, payload)
+        group = groups.setdefault(
+            (family_key, family_title),
+            {
+                "kind": family_key,
+                "severity": finding.severity,
+                "title": family_title,
+                "created_at": _to_beijing_iso(finding.created_at),
+                "instances": [],
+                "urls": set(),
+                "member_kinds": set(),
+            },
+        )
+        group["instances"].append(payload)
+        group["urls"].add(finding.url)
+        group["member_kinds"].add(finding.kind)
+        if _severity_score(finding.severity) > _severity_score(str(group["severity"])):
+            group["severity"] = finding.severity
+
+    status_map = {(item.finding_kind, item.finding_title): item for item in status_records}
+    grouped: list[dict[str, object]] = []
+    for group in groups.values():
+        reason, confidence, recommendation, evidence_type = _explain_finding(group["kind"], group["severity"])
+        instances = sorted(group["instances"], key=lambda item: (item.get("line") or 0, item.get("snippet") or ""))
+        urls = sorted(group["urls"])
+        lines = [str(item["line"]) for item in instances if item.get("line")]
+        summary = f"共命中 {len(instances)} 处，涉及 {len(urls)} 个页面"
+        if lines:
+            summary += f"，行号 {', '.join(lines[:8])}"
+        status_record = status_map.get((str(group["kind"]), str(group["title"])))
+        linked_verifications = _match_verifications(urls, verifications)
+        verdict = _final_assessment(str(group["severity"]), linked_verifications)
+        grouped.append(
+            {
+                "url": urls[0] if urls else "",
+                "urls": urls,
+                "page_count": len(urls),
+                "kind": group["kind"],
+                "member_kinds": sorted(group["member_kinds"]),
+                "severity": group["severity"],
+                "title": group["title"],
+                "summary": summary,
+                "evidence": instances[0].get("snippet") or "",
+                "instances": instances,
+                "instance_count": len(instances),
+                "reason": reason,
+                "confidence": confidence,
+                "recommendation": recommendation,
+                "evidence_type": evidence_type,
+                "final_assessment": verdict["value"],
+                "final_assessment_label": verdict["label"],
+                "final_assessment_reason": verdict["reason"],
+                "review_status": status_record.status if status_record else "open",
+                "review_status_label": _review_status_label(status_record.status if status_record else "open"),
+                "review_note": status_record.note if status_record else None,
+                "matched_verifications": len(linked_verifications),
+                "created_at": group["created_at"],
+            }
+        )
+
+    return sorted(grouped, key=lambda item: (_severity_score(item["severity"]), item["title"]), reverse=True)
+
+
+def _match_verifications(urls: list[str], verifications: list[DynamicVerification]) -> list[DynamicVerification]:
+    url_set = {url for url in urls if url}
+    return [item for item in verifications if item.page_url in url_set]
+
+
+def _final_assessment(severity: str, verifications: list[DynamicVerification]) -> dict[str, str]:
+    if any(item.status == "verified" for item in verifications):
+        return {
+            "value": "confirmed",
+            "label": "已动态确认",
+            "reason": "该漏洞关联页面已经存在动态验证成功结果，可以优先视为真实风险。",
+        }
+    if severity == "high":
+        return {
+            "value": "needs_review",
+            "label": "高危待复核",
+            "reason": "静态规则给出了高危信号，但当前没有动态验证成功结果，建议继续人工复核。",
+        }
+    return {
+        "value": "not_triggered",
+        "label": "未触发",
+        "reason": "当前没有观察到动态验证成功结果，暂时更适合作为待观察风险保留。",
+    }
+
+
+def _review_status_label(status: str) -> str:
+    return {
+        "open": "待处理",
+        "confirmed": "人工确认",
+        "false_positive": "误报",
+        "fixed": "已修复",
+        "ignored": "已忽略",
+    }.get(status, "待处理")
+
+
+def _severity_score(severity: str) -> int:
+    return {"high": 3, "medium": 2, "low": 1}.get(severity, 1)
+
+
+def _parse_dynamic_evidence(raw: str | None) -> dict[str, str | None]:
+    if not raw:
+        return {"engine": None, "detail": None}
+    try:
+        payload = json.loads(raw)
+        if isinstance(payload, dict):
+            return {
+                "engine": payload.get("engine"),
+                "detail": payload.get("detail") or raw,
+            }
+    except Exception:
+        pass
+    return {"engine": None, "detail": raw}
+
+
+def _explain_dynamic_verification(
+    vector: str, status: str, parameter_name: str | None, evidence: str | None
+) -> dict[str, str]:
+    parameter_label = parameter_name or "未命名参数"
+    if status == "verified":
+        return {
+            "level": "confirmed",
+            "summary": f"动态验证已确认 {vector} 向量可触发，参数 {parameter_label} 的 payload 在响应中出现。",
+            "risk": "这说明目标页面存在真实的输入回显链路，若缺少输出编码或上下文隔离，通常可进一步演化为真实 XSS。",
+            "recommendation": "优先修复该参数的输出编码与上下文处理逻辑，并核查是否可在 HTML、属性或脚本上下文中执行。",
+        }
+    if status == "suspected":
+        return {
+            "level": "suspected",
+            "summary": f"动态验证发现 {vector} 向量存在明显信号，但当前仍需进一步人工确认。",
+            "risk": "页面脚本已读取相关输入源，这通常意味着存在可被利用的前提条件。",
+            "recommendation": "建议结合 Selenium 或浏览器开发者工具继续确认 DOM 变化和脚本执行路径。",
+        }
+    if status == "error":
+        return {
+            "level": "error",
+            "summary": f"动态验证在请求 {vector} 向量时出错，未能完成有效验证。",
+            "risk": "当前结果不能说明目标安全，只表示本次验证链路失败。",
+            "recommendation": "优先检查网络、代理、TLS 或目标站点限制，再重新执行动态验证。",
+        }
+    return {
+        "level": "not_triggered",
+        "summary": f"动态验证未观察到 {vector} 向量对参数 {parameter_label} 产生明显回显。",
+        "risk": "这只能说明当前 payload 未触发，不代表目标不存在变种利用路径。",
+        "recommendation": "可以尝试更贴合页面上下文的 payload，或结合静态结果继续人工复核。",
+    }
+
+
+def _to_beijing_dt(value: datetime | None) -> datetime | None:
+    if value is None:
         return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=BEIJING_TZ)
+    return value.astimezone(BEIJING_TZ)
 
 
-def _get(name: str, default: Any) -> Any:
-    global _SETTINGS, _SETTINGS_LOADED
-    if not _SETTINGS_LOADED:
-        _SETTINGS = _settings_module()
-        _SETTINGS_LOADED = True
-    if name in os.environ:
-        return os.environ[name]
-    if _SETTINGS is not None and hasattr(_SETTINGS, name):
-        return getattr(_SETTINGS, name)
-    return default
+def _to_beijing_iso(value: datetime | None) -> str | None:
+    dt = _to_beijing_dt(value)
+    return dt.isoformat() if dt else None
 
 
-def _get_int(name: str, default: int) -> int:
-    v = _get(name, None)
-    if v is None or v == "":
-        return default
-    try:
-        return int(v)
-    except Exception:
-        return default
-
-
-def _get_bool(name: str, default: bool) -> bool:
-    v = _get(name, None)
-    if v is None or v == "":
-        return default
-    if isinstance(v, bool):
-        return v
-    s = str(v).strip().lower()
-    if s in {"1", "true", "yes", "y", "on"}:
-        return True
-    if s in {"0", "false", "no", "n", "off"}:
-        return False
-    return default
+def _to_beijing_ts(value: datetime | None) -> int | None:
+    dt = _to_beijing_dt(value)
+    return int(dt.timestamp()) if dt else None
