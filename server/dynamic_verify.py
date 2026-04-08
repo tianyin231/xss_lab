@@ -16,7 +16,7 @@ from selenium.webdriver.firefox.options import Options as FirefoxOptions
 
 from app_config import get, get_bool, get_float, get_int
 from server.db import db
-from server.models import DynamicVerification, Job, Page
+from server.models import DynamicVerification, Finding, Job, Page
 
 
 @dataclass(frozen=True)
@@ -48,6 +48,11 @@ def run_dynamic_verification(job_id: str, log: Callable[[str], None] | None = No
         _emit(log, "[动态验证] 未找到可验证页面")
         return 0
 
+    findings = Finding.query.filter_by(job_id=job_id).all()
+    findings_by_url: dict[str, list[Finding]] = {}
+    for finding in findings:
+        findings_by_url.setdefault(finding.url, []).append(finding)
+
     payload = str(get("DYNAMIC_VERIFY_PAYLOAD", "xsslab_verify_payload_2026"))
     timeout = get_float("DYNAMIC_VERIFY_TIMEOUT", 15.0)
     wait_seconds = get_float("DYNAMIC_VERIFY_WAIT_SECONDS", 2.0)
@@ -67,9 +72,14 @@ def run_dynamic_verification(job_id: str, log: Callable[[str], None] | None = No
             for page in pages:
                 if not page.url.lower().startswith(("http://", "https://")):
                     continue
-                records.extend(_verify_query(client, driver, page, payload, wait_seconds))
-                records.extend(_verify_forms(client, driver, page, payload, wait_seconds))
-                records.extend(_verify_hash(page, payload, driver is not None))
+                vectors = _plan_verification_vectors(page, findings_by_url.get(page.url, []))
+                _emit(log, f"[动态验证] 页面 {page.url} 计划验证向量: {', '.join(vectors) if vectors else 'none'}")
+                if "query" in vectors:
+                    records.extend(_verify_query(client, driver, page, payload, wait_seconds))
+                if "form" in vectors:
+                    records.extend(_verify_forms(client, driver, page, payload, wait_seconds))
+                if "hash" in vectors:
+                    records.extend(_verify_hash(page, payload, driver is not None))
     finally:
         if driver is not None:
             try:
@@ -190,6 +200,65 @@ def _verify_hash(page: Page, payload: str, selenium_enabled: bool) -> list[Verif
             evidence=evidence,
         )
     ]
+
+
+def _plan_verification_vectors(page: Page, findings: list[Finding]) -> list[str]:
+    hints: set[str] = set()
+    content = page.content or ""
+    split_result = urlsplit(page.url)
+    has_query = bool(parse_qsl(split_result.query, keep_blank_values=True))
+    has_form = "<form" in content.lower()
+
+    for finding in findings:
+        evidence = _parse_finding_evidence(finding.evidence)
+        text = " ".join(
+            [
+                finding.kind,
+                finding.title,
+                str(evidence.get("label") or ""),
+                str(evidence.get("snippet") or ""),
+                str(evidence.get("source") or ""),
+                str(evidence.get("flow_display") or ""),
+            ]
+        ).lower()
+        if any(token in text for token in ("location.hash", "hashchange")):
+            hints.add("hash")
+        if any(token in text for token in ("location.search", "query", "document.url", "location.href")):
+            hints.add("query")
+        if any(token in text for token in ("form", "input", "textarea", "select")):
+            hints.add("form")
+
+    vectors: list[str] = []
+    if "query" in hints and has_query:
+        vectors.append("query")
+    if "hash" in hints:
+        vectors.append("hash")
+    if "form" in hints and has_form:
+        vectors.append("form")
+
+    fallback_vectors: list[str] = []
+    if has_query:
+        fallback_vectors.append("query")
+    if has_form:
+        fallback_vectors.append("form")
+    if any(signal in content for signal in ("location.hash", "hashchange", "decodeURIComponent(location.hash)")):
+        fallback_vectors.append("hash")
+
+    ordered_vectors: list[str] = []
+    for vector in vectors + fallback_vectors:
+        if vector not in ordered_vectors:
+            ordered_vectors.append(vector)
+    return ordered_vectors
+
+
+def _parse_finding_evidence(raw: str) -> dict[str, object]:
+    try:
+        payload = json.loads(raw)
+        if isinstance(payload, dict):
+            return payload
+    except Exception:
+        pass
+    return {"snippet": raw}
 
 
 def _request_and_check(

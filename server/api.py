@@ -2,8 +2,15 @@
 from __future__ import annotations
 
 import json
+import os
+import sys
 from collections import Counter
 from datetime import datetime, timedelta, timezone
+
+if __package__ in {None, ""}:
+    PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if PROJECT_ROOT not in sys.path:
+        sys.path.insert(0, PROJECT_ROOT)
 
 from ai import get_analyzer
 from app_config import get_bool, get_int
@@ -12,6 +19,7 @@ from sqlalchemy import func
 
 from server.db import db
 from server.models import AIReport, DynamicVerification, Finding, FindingStatus, Job, Log, Page
+from server.report_export import build_export_filename, render_report_html, render_report_json
 from server.runner import bus, runner
 
 api_bp = Blueprint("api", __name__)
@@ -164,84 +172,33 @@ def get_report(job_id: str) -> Response:
     job: Job | None = db.session.get(Job, job_id)
     if job is None:
         return jsonify({"error": "not found"}), 404
+    return jsonify(_build_report_payload(job))
 
-    pages_count = db.session.query(func.count(Page.id)).filter_by(job_id=job_id).scalar() or 0
-    raw_findings = Finding.query.filter_by(job_id=job_id).order_by(Finding.id.asc()).all()
-    logs = Log.query.filter_by(job_id=job_id).order_by(Log.id.desc()).limit(500).all()
-    pages = Page.query.filter_by(job_id=job_id).order_by(Page.id.desc()).limit(100).all()
-    verifications = DynamicVerification.query.filter_by(job_id=job_id).order_by(DynamicVerification.id.asc()).all()
-    status_records = FindingStatus.query.filter_by(job_id=job_id).all()
 
-    grouped_findings = _build_grouped_findings(raw_findings, verifications, status_records)
-    severity_stats = Counter(item["severity"] for item in grouped_findings)
-    kind_stats = Counter(item["kind"] for item in grouped_findings)
-    page_risk = _top_risk_pages(grouped_findings)
-    verification_stats = Counter(item.status for item in verifications)
+@api_bp.get("/jobs/<job_id>/export")
+def export_report(job_id: str) -> Response:
+    job: Job | None = db.session.get(Job, job_id)
+    if job is None:
+        return jsonify({"error": "not found"}), 404
 
-    pages.reverse()
-    logs.reverse()
+    export_format = str(request.args.get("format") or "html").strip().lower()
+    if export_format not in {"html", "json"}:
+        return jsonify({"error": "unsupported format"}), 400
 
-    return jsonify(
-        {
-            "job": {
-                "id": job.id,
-                "target_url": job.target_url,
-                "status": job.status,
-                "error": job.error,
-                "created_at": _to_beijing_iso(job.created_at),
-                "started_at": _to_beijing_iso(job.started_at),
-                "finished_at": _to_beijing_iso(job.finished_at),
-            },
-            "stats": {
-                "pages": pages_count,
-                "findings": len(grouped_findings),
-                "instances": len(raw_findings),
-                "severity": dict(severity_stats),
-                "by_kind": dict(kind_stats),
-            },
-            "summary": {
-                "top_risk_pages": page_risk,
-            },
-            "dynamic_verification": {
-                "enabled": get_bool("DYNAMIC_VERIFY_ENABLED", False),
-                "stats": dict(verification_stats),
-                "results": [
-                    {
-                        "id": item.id,
-                        "page_id": item.page_id,
-                        "page_url": item.page_url,
-                        "target_url": item.target_url,
-                        "vector": item.vector,
-                        "parameter_name": item.parameter_name,
-                        "payload": item.payload,
-                        "status": item.status,
-                        "evidence": _parse_dynamic_evidence(item.evidence)["detail"],
-                        "engine": _parse_dynamic_evidence(item.evidence)["engine"],
-                        "created_at": _to_beijing_iso(item.created_at),
-                        **_explain_dynamic_verification(
-                            item.vector,
-                            item.status,
-                            item.parameter_name,
-                            _parse_dynamic_evidence(item.evidence)["detail"],
-                        ),
-                    }
-                    for item in verifications
-                ],
-            },
-            "pages": [
-                {
-                    "id": p.id,
-                    "url": p.url,
-                    "status_code": p.status_code,
-                    "content_type": p.content_type,
-                    "sha256": p.sha256,
-                    "fetched_at": _to_beijing_iso(p.fetched_at),
-                }
-                for p in pages
-            ],
-            "findings": grouped_findings,
-            "logs": [{"message": l.message, "ts": _to_beijing_ts(l.created_at)} for l in logs],
-        }
+    report_payload = _build_report_payload(job)
+    if export_format == "json":
+        body = render_report_json(report_payload)
+        mimetype = "application/json; charset=utf-8"
+    else:
+        body = render_report_html(report_payload)
+        mimetype = "text/html; charset=utf-8"
+
+    return Response(
+        body,
+        mimetype=mimetype,
+        headers={
+            "Content-Disposition": f'attachment; filename="{build_export_filename(job.id, export_format)}"'
+        },
     )
 
 
@@ -361,23 +318,7 @@ def get_ai_report(job_id: str) -> Response:
         return jsonify({"error": "not found"}), 404
 
     reports = AIReport.query.filter_by(job_id=job_id).order_by(AIReport.id.asc()).all()
-    return jsonify(
-        [
-            {
-                "id": r.id,
-                "page_url": r.page_url,
-                "summary": r.summary,
-                "accuracy": r.accuracy,
-                "false_positives": json.loads(r.false_positives) if r.false_positives else [],
-                "false_negatives": json.loads(r.false_negatives) if r.false_negatives else [],
-                "suggestions": json.loads(r.suggestions) if r.suggestions else [],
-                "risk_assessment": r.risk_assessment,
-                "full_report": r.full_report,
-                "created_at": _to_beijing_iso(r.created_at),
-            }
-            for r in reports
-        ]
-    )
+    return jsonify([_serialize_ai_report(r) for r in reports])
 
 
 @api_bp.get("/pages/<page_id>")
@@ -398,6 +339,68 @@ def get_page_detail(page_id: int) -> Response:
             "fetched_at": _to_beijing_iso(page.fetched_at),
         }
     )
+
+
+def _build_report_payload(job: Job) -> dict[str, object]:
+    job_id = job.id
+    pages_count = db.session.query(func.count(Page.id)).filter_by(job_id=job_id).scalar() or 0
+    raw_findings = Finding.query.filter_by(job_id=job_id).order_by(Finding.id.asc()).all()
+    logs = Log.query.filter_by(job_id=job_id).order_by(Log.id.desc()).limit(500).all()
+    pages = Page.query.filter_by(job_id=job_id).order_by(Page.id.desc()).limit(100).all()
+    verifications = DynamicVerification.query.filter_by(job_id=job_id).order_by(DynamicVerification.id.asc()).all()
+    status_records = FindingStatus.query.filter_by(job_id=job_id).all()
+    ai_reports = AIReport.query.filter_by(job_id=job_id).order_by(AIReport.id.asc()).all()
+
+    grouped_findings = _build_grouped_findings(raw_findings, verifications, status_records)
+    severity_stats = Counter(item["severity"] for item in grouped_findings)
+    kind_stats = Counter(item["kind"] for item in grouped_findings)
+    page_risk = _top_risk_pages(grouped_findings)
+    verification_stats = Counter(item.status for item in verifications)
+
+    pages.reverse()
+    logs.reverse()
+
+    return {
+        "job": {
+            "id": job.id,
+            "target_url": job.target_url,
+            "status": job.status,
+            "error": job.error,
+            "created_at": _to_beijing_iso(job.created_at),
+            "started_at": _to_beijing_iso(job.started_at),
+            "finished_at": _to_beijing_iso(job.finished_at),
+        },
+        "stats": {
+            "pages": pages_count,
+            "findings": len(grouped_findings),
+            "instances": len(raw_findings),
+            "severity": dict(severity_stats),
+            "severity_labels": {key: _severity_label(key) for key in severity_stats},
+            "by_kind": dict(kind_stats),
+        },
+        "summary": {
+            "top_risk_pages": page_risk,
+        },
+        "dynamic_verification": {
+            "enabled": get_bool("DYNAMIC_VERIFY_ENABLED", False),
+            "stats": dict(verification_stats),
+            "results": [_serialize_verification(item) for item in verifications],
+        },
+        "ai_reports": [_serialize_ai_report(item) for item in ai_reports],
+        "pages": [
+            {
+                "id": p.id,
+                "url": p.url,
+                "status_code": p.status_code,
+                "content_type": p.content_type,
+                "sha256": p.sha256,
+                "fetched_at": _to_beijing_iso(p.fetched_at),
+            }
+            for p in pages
+        ],
+        "findings": grouped_findings,
+        "logs": [{"message": l.message, "ts": _to_beijing_ts(l.created_at)} for l in logs],
+    }
 
 
 def _group_findings(
@@ -444,6 +447,8 @@ def _group_findings(
                 "urls": urls,
                 "page_count": len(urls),
                 "kind": group["kind"],
+                "kind_zh": _finding_kind_zh(str(group["kind"])),
+                "kind_display": _finding_kind_display(str(group["kind"])),
                 "member_kinds": sorted(group["member_kinds"]),
                 "severity": group["severity"],
                 "title": group["title"],
@@ -470,10 +475,14 @@ def _parse_evidence(raw: str) -> dict[str, object]:
                 "line": payload.get("line"),
                 "label": payload.get("label"),
                 "snippet": payload.get("snippet") or raw,
+                "source": payload.get("source"),
+                "path": payload.get("path") if isinstance(payload.get("path"), list) else [],
+                "sink": payload.get("sink"),
+                "flow_display": payload.get("flow_display"),
             }
     except Exception:
         pass
-    return {"line": None, "label": None, "snippet": raw}
+    return {"line": None, "label": None, "snippet": raw, "source": None, "path": [], "sink": None, "flow_display": None}
 
 
 def _finding_family(kind: str, title: str, payload: dict[str, object]) -> tuple[str, str]:
@@ -503,6 +512,13 @@ def _explain_finding(kind: str, severity: str) -> tuple[str, str, str, str]:
             "页面中同时出现潜在输入源和危险输出点，存在较强的 DOM XSS 风险信号。",
             "high",
             "优先检查 URL、Cookie 等数据是否直接流入 innerHTML、document.write 等危险位置。",
+            "flow",
+        )
+    if kind == "ast_data_flow":
+        return (
+            "脚本中识别到了更明确的变量赋值链，说明用户可控输入已经沿着脚本逻辑流向危险 Sink，比普通关键字共现更接近真实数据流。",
+            "high",
+            "优先检查这条变量传播链上的赋值和拼接逻辑，确认是否需要改为安全输出或增加中间清洗。",
             "flow",
         )
     if kind == "dom_sink":
@@ -609,7 +625,7 @@ def _build_grouped_findings(
         if lines:
             summary += f"，行号 {', '.join(lines[:8])}"
         status_record = status_map.get((str(group["kind"]), str(group["title"])))
-        linked_verifications = _match_verifications(urls, verifications)
+        linked_verifications = _match_verifications_for_group(instances, urls, verifications)
         verdict = _final_assessment(str(group["severity"]), linked_verifications)
         grouped.append(
             {
@@ -619,6 +635,7 @@ def _build_grouped_findings(
                 "kind": group["kind"],
                 "member_kinds": sorted(group["member_kinds"]),
                 "severity": group["severity"],
+                "severity_label": _severity_label(str(group["severity"])),
                 "title": group["title"],
                 "summary": summary,
                 "evidence": instances[0].get("snippet") or "",
@@ -626,6 +643,7 @@ def _build_grouped_findings(
                 "instance_count": len(instances),
                 "reason": reason,
                 "confidence": confidence,
+                "confidence_label": _confidence_label(confidence),
                 "recommendation": recommendation,
                 "evidence_type": evidence_type,
                 "final_assessment": verdict["value"],
@@ -635,9 +653,12 @@ def _build_grouped_findings(
                 "review_status_label": _review_status_label(status_record.status if status_record else "open"),
                 "review_note": status_record.note if status_record else None,
                 "matched_verifications": len(linked_verifications),
+                "linked_verification_results": [_serialize_verification(item) for item in linked_verifications],
                 "created_at": group["created_at"],
             }
         )
+
+    grouped.extend(_build_dynamic_only_findings(grouped, verifications))
 
     return sorted(grouped, key=lambda item: (_severity_score(item["severity"]), item["title"]), reverse=True)
 
@@ -645,6 +666,155 @@ def _build_grouped_findings(
 def _match_verifications(urls: list[str], verifications: list[DynamicVerification]) -> list[DynamicVerification]:
     url_set = {url for url in urls if url}
     return [item for item in verifications if item.page_url in url_set]
+
+
+def _match_verifications_for_group(
+    instances: list[dict[str, object]],
+    urls: list[str],
+    verifications: list[DynamicVerification],
+) -> list[DynamicVerification]:
+    candidates = _match_verifications(urls, verifications)
+    vectors = _expected_vectors_for_instances(instances)
+    if not vectors:
+        return candidates
+    return [item for item in candidates if item.vector in vectors]
+
+
+def _expected_vectors_for_instances(instances: list[dict[str, object]]) -> set[str]:
+    vectors: set[str] = set()
+    for item in instances:
+        text = " ".join(
+            [
+                str(item.get("label") or ""),
+                str(item.get("snippet") or ""),
+                str(item.get("source") or ""),
+                str(item.get("flow_display") or ""),
+            ]
+        ).lower()
+        if any(token in text for token in ("location.search", "document.url", "location.href", "query")):
+            vectors.add("query")
+        if any(token in text for token in ("location.hash", "hashchange")):
+            vectors.add("hash")
+        if any(token in text for token in ("form", "input", "textarea", "select")):
+            vectors.add("form")
+    return vectors
+
+
+def _serialize_verification(item: DynamicVerification) -> dict[str, object]:
+    detail = _parse_dynamic_evidence(item.evidence)
+    explanation = _explain_dynamic_verification(
+        item.vector,
+        item.status,
+        item.parameter_name,
+        detail["detail"],
+    )
+    return {
+        "id": item.id,
+        "page_id": item.page_id,
+        "page_url": item.page_url,
+        "target_url": item.target_url,
+        "vector": item.vector,
+        "parameter_name": item.parameter_name,
+        "payload": item.payload,
+        "status": item.status,
+        "engine": detail["engine"],
+        "level": explanation["level"],
+        "level_label": _dynamic_level_label(explanation["level"]),
+        "summary": explanation["summary"],
+        "reason": explanation["risk"],
+        "recommendation": explanation["recommendation"],
+        "evidence": detail["detail"],
+        "created_at": _to_beijing_iso(item.created_at),
+    }
+
+
+def _serialize_ai_report(item: AIReport) -> dict[str, object]:
+    return {
+        "id": item.id,
+        "page_url": item.page_url,
+        "summary": item.summary,
+        "accuracy": item.accuracy,
+        "false_positives": json.loads(item.false_positives) if item.false_positives else [],
+        "false_negatives": json.loads(item.false_negatives) if item.false_negatives else [],
+        "suggestions": json.loads(item.suggestions) if item.suggestions else [],
+        "risk_assessment": item.risk_assessment,
+        "full_report": item.full_report,
+        "created_at": _to_beijing_iso(item.created_at),
+    }
+
+
+def _build_dynamic_only_findings(
+    grouped_findings: list[dict[str, object]],
+    verifications: list[DynamicVerification],
+) -> list[dict[str, object]]:
+    matched_ids: set[int] = set()
+    for finding in grouped_findings:
+        for item in finding.get("linked_verification_results", []):
+            verification_id = item.get("id")
+            if isinstance(verification_id, int):
+                matched_ids.add(verification_id)
+
+    dynamic_only: list[dict[str, object]] = []
+    for item in verifications:
+        if item.status != "verified" or item.id in matched_ids:
+            continue
+
+        detail = _parse_dynamic_evidence(item.evidence)
+        explanation = _explain_dynamic_verification(
+            item.vector,
+            item.status,
+            item.parameter_name,
+            detail["detail"],
+        )
+        kind = f"dynamic_verified_{item.vector}"
+        dynamic_only.append(
+            {
+                "url": item.page_url,
+                "urls": [item.page_url],
+                "page_count": 1,
+                "kind": kind,
+                "kind_zh": _finding_kind_zh(kind),
+                "kind_display": _finding_kind_display(kind),
+                "member_kinds": [kind],
+                "severity": "high",
+                "severity_label": _severity_label("high"),
+                "title": _dynamic_finding_title(item.vector),
+                "summary": explanation["summary"],
+                "evidence": detail["detail"] or item.target_url,
+                "instances": [
+                    {
+                        "line": None,
+                        "label": item.parameter_name,
+                        "snippet": detail["detail"] or item.target_url,
+                        "url": item.page_url,
+                    }
+                ],
+                "instance_count": 1,
+                "reason": explanation["risk"],
+                "confidence": "high",
+                "confidence_label": _confidence_label("high"),
+                "recommendation": explanation["recommendation"],
+                "evidence_type": "dynamic",
+                "final_assessment": "confirmed",
+                "final_assessment_label": "已动态确认",
+                "final_assessment_reason": "该问题由动态验证直接确认，即使静态规则未产出对应漏洞标签，也应进入发现列表。",
+                "review_status": "open",
+                "review_status_label": _review_status_label("open"),
+                "review_note": None,
+                "matched_verifications": 1,
+                "linked_verification_results": [_serialize_verification(item)],
+                "created_at": _to_beijing_iso(item.created_at),
+            }
+        )
+    return dynamic_only
+
+
+def _dynamic_finding_title(vector: str) -> str:
+    return {
+        "query": "动态确认查询参数风险",
+        "form": "动态确认表单回显风险",
+        "hash": "动态确认哈希参数风险",
+    }.get(vector, "动态确认输入回显风险")
 
 
 def _final_assessment(severity: str, verifications: list[DynamicVerification]) -> dict[str, str]:
@@ -675,6 +845,55 @@ def _review_status_label(status: str) -> str:
         "fixed": "已修复",
         "ignored": "已忽略",
     }.get(status, "待处理")
+
+
+def _severity_label(severity: str) -> str:
+    return {
+        "high": "高危",
+        "medium": "中危",
+        "low": "低危",
+    }.get(severity, severity)
+
+
+def _confidence_label(confidence: str) -> str:
+    return {
+        "high": "高",
+        "medium": "中",
+        "low": "低",
+    }.get(confidence, confidence)
+
+
+def _dynamic_level_label(level: str) -> str:
+    return {
+        "confirmed": "已确认",
+        "suspected": "疑似",
+        "error": "错误",
+        "not_triggered": "未触发",
+    }.get(level, level)
+
+
+def _finding_kind_zh(kind: str) -> str:
+    return {
+        "inline_event_navigation": "内联事件跳转风险",
+        "inline_event_handler": "内联事件处理器风险",
+        "executable_attribute": "可执行属性注入风险",
+        "javascript_protocol": "JavaScript 协议执行风险",
+        "data_protocol": "Data 协议执行风险",
+        "iframe_srcdoc": "iframe srcdoc 注入风险",
+        "source_sink_flow": "DOM XSS 数据流风险",
+        "ast_data_flow": "脚本数据流危险汇点风险",
+        "dom_sink": "危险 DOM 汇点风险",
+        "tainted_source": "潜在用户可控输入源",
+        "javascript_redirection": "JavaScript 重定向风险",
+        "anomaly": "页面异常信号",
+        "dynamic_verified_query": "动态确认查询参数风险",
+        "dynamic_verified_form": "动态确认表单回显风险",
+        "dynamic_verified_hash": "动态确认哈希参数风险",
+    }.get(kind, "未知漏洞类型")
+
+
+def _finding_kind_display(kind: str) -> str:
+    return f"{kind}（{_finding_kind_zh(kind)}）"
 
 
 def _severity_score(severity: str) -> int:
@@ -745,3 +964,9 @@ def _to_beijing_iso(value: datetime | None) -> str | None:
 def _to_beijing_ts(value: datetime | None) -> int | None:
     dt = _to_beijing_dt(value)
     return int(dt.timestamp()) if dt else None
+
+
+if __name__ == "__main__":
+    from run_dev import main
+
+    main()

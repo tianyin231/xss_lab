@@ -25,6 +25,16 @@ SOURCE_PATTERNS = [
     ("window_name", r"window\.name", "窗口名称 window.name"),
 ]
 
+SOURCE_EXPR_PATTERNS = [
+    (r"\blocation\.search\b", "location.search"),
+    (r"\blocation\.hash\b", "location.hash"),
+    (r"\blocation\.href\b", "location.href"),
+    (r"\bdocument\.(?:URL|documentURI|baseURI)\b", "document.URL"),
+    (r"\bdocument\.cookie\b", "document.cookie"),
+    (r"\b(?:localStorage|sessionStorage)\b", "storage"),
+    (r"\bwindow\.name\b", "window.name"),
+]
+
 SINK_PATTERNS = [
     ("innerHTML", "medium", r"\.innerHTML\s*=", "危险 DOM Sink: innerHTML"),
     ("outerHTML", "medium", r"\.outerHTML\s*=", "危险 DOM Sink: outerHTML"),
@@ -42,6 +52,14 @@ INLINE_EVENT_RE = re.compile(
     r"<(?P<tag>[a-zA-Z0-9:_-]+)(?P<body>[^>]*?\s(?P<attr>on[a-zA-Z0-9_-]+)\s*=\s*(?P<quote>['\"])(?P<value>.*?)(?P=quote)[^>]*)>",
     re.I | re.S,
 )
+SCRIPT_BLOCK_RE = re.compile(r"<script\b[^>]*>(?P<body>.*?)</script>", re.I | re.S)
+ASSIGN_RE = re.compile(r"^(?:const|let|var)?\s*([A-Za-z_$][\w$]*)\s*=\s*(.+)$", re.S)
+SINK_ASSIGN_RE = re.compile(r"(.+?\.(?:innerHTML|outerHTML|srcdoc))\s*=\s*(.+)$", re.S)
+INSERT_HTML_RE = re.compile(r"insertAdjacentHTML\s*\(\s*[^,]+,\s*(.+?)\)$", re.S)
+WRITE_RE = re.compile(r"document\.write(?:ln)?\s*\(\s*(.+?)\s*\)$", re.S)
+EVAL_RE = re.compile(r"(?:eval|setTimeout|setInterval)\s*\(\s*(.+?)\s*\)$", re.S)
+HTML_CALL_RE = re.compile(r"\.html\s*\(\s*(.+?)\s*\)$", re.S)
+IDENTIFIER_RE = re.compile(r"\b[A-Za-z_$][\w$]*\b")
 EXECUTABLE_ATTR_RE = re.compile(
     r"<(?P<tag>[a-zA-Z0-9:_-]+)(?P<body>[^>]*?\s(?P<attr>href|src|action|formaction)\s*=\s*(?P<quote>['\"])(?P<value>.*?)(?P=quote)[^>]*)>",
     re.I | re.S,
@@ -55,15 +73,23 @@ def analyze_html(html: str) -> Iterable[StaticFinding]:
     findings: list[StaticFinding] = []
     seen: set[tuple[str, str, str]] = set()
 
-    def add(kind: str, severity: str, title: str, snippet: str, line: int, label: str) -> None:
-        payload = json.dumps(
-            {
-                "line": line,
-                "label": label,
-                "snippet": _normalize_ws(snippet)[:500],
-            },
-            ensure_ascii=False,
-        )
+    def add(
+        kind: str,
+        severity: str,
+        title: str,
+        snippet: str,
+        line: int,
+        label: str,
+        extra: dict[str, object] | None = None,
+    ) -> None:
+        payload_obj = {
+            "line": line,
+            "label": label,
+            "snippet": _normalize_ws(snippet)[:500],
+        }
+        if extra:
+            payload_obj.update(extra)
+        payload = json.dumps(payload_obj, ensure_ascii=False)
         key = (kind, title, payload)
         if key in seen:
             return
@@ -133,6 +159,8 @@ def analyze_html(html: str) -> Iterable[StaticFinding]:
             "location",
         )
 
+    _analyze_script_flows(html, add)
+
     script_count = html.lower().count("<script")
     if script_count > 20:
         add("anomaly", "low", "脚本标签数量异常", f"检测到 {script_count} 个 script 标签", 1, "script_count")
@@ -142,6 +170,130 @@ def analyze_html(html: str) -> Iterable[StaticFinding]:
 
 def _line_of_offset(text: str, offset: int) -> int:
     return text.count("\n", 0, offset) + 1
+
+
+def _analyze_script_flows(html: str, add) -> None:
+    for script_match in SCRIPT_BLOCK_RE.finditer(html):
+        script_body = script_match.group("body") or ""
+        if not script_body.strip():
+            continue
+        base_offset = script_match.start("body")
+        tainted_vars: dict[str, dict[str, object]] = {}
+        for raw_statement, start in _split_statements(script_body):
+            statement = raw_statement.strip()
+            if not statement:
+                continue
+
+            line = _line_of_offset(html, base_offset + start)
+
+            assign_match = ASSIGN_RE.match(statement)
+            if assign_match:
+                flow = _find_source_flow(assign_match.group(2).strip(), tainted_vars)
+                if flow:
+                    tainted_vars[assign_match.group(1)] = {
+                        "source": flow["source"],
+                        "path": list(flow.get("path") or []) + [assign_match.group(1)],
+                    }
+
+            sink_match = SINK_ASSIGN_RE.match(statement)
+            if sink_match:
+                flow = _find_source_flow(sink_match.group(2).strip(), tainted_vars)
+                if flow:
+                    sink_target = sink_match.group(1).strip()
+                    flow_display = _build_flow_display(flow["source"], flow.get("path") or [], sink_target)
+                    add(
+                        "ast_data_flow",
+                        "high",
+                        "Script data flow to dangerous sink",
+                        statement,
+                        line,
+                        flow_display,
+                        {
+                            "source": flow["source"],
+                            "path": flow.get("path") or [],
+                            "sink": sink_target,
+                            "flow_display": flow_display,
+                        },
+                    )
+
+            for pattern, sink_label in (
+                (INSERT_HTML_RE, "insertAdjacentHTML"),
+                (WRITE_RE, "document.write"),
+                (EVAL_RE, "eval/setTimeout"),
+                (HTML_CALL_RE, "jquery.html"),
+            ):
+                call_match = pattern.search(statement)
+                if not call_match:
+                    continue
+                flow = _find_source_flow(call_match.group(1).strip(), tainted_vars)
+                if flow:
+                    flow_display = _build_flow_display(flow["source"], flow.get("path") or [], sink_label)
+                    add(
+                        "ast_data_flow",
+                        "high",
+                        "Script data flow to dangerous sink",
+                        statement,
+                        line,
+                        flow_display,
+                        {
+                            "source": flow["source"],
+                            "path": flow.get("path") or [],
+                            "sink": sink_label,
+                            "flow_display": flow_display,
+                        },
+                    )
+                    break
+
+
+def _split_statements(script: str) -> list[tuple[str, int]]:
+    statements: list[tuple[str, int]] = []
+    start = 0
+    in_single = False
+    in_double = False
+    in_template = False
+    escaped = False
+
+    for idx, ch in enumerate(script):
+        if escaped:
+            escaped = False
+            continue
+        if ch == "\\" and (in_single or in_double or in_template):
+            escaped = True
+            continue
+        if ch == "'" and not in_double and not in_template:
+            in_single = not in_single
+        elif ch == '"' and not in_single and not in_template:
+            in_double = not in_double
+        elif ch == "`" and not in_single and not in_double:
+            in_template = not in_template
+        elif ch == ";" and not in_single and not in_double and not in_template:
+            statements.append((script[start:idx], start))
+            start = idx + 1
+
+    tail = script[start:]
+    if tail.strip():
+        statements.append((tail, start))
+    return statements
+
+
+def _find_source_flow(expr: str, tainted_vars: dict[str, dict[str, object]]) -> dict[str, object] | None:
+    for pattern, label in SOURCE_EXPR_PATTERNS:
+        if re.search(pattern, expr):
+            return {"source": label, "path": []}
+    for name in IDENTIFIER_RE.findall(expr):
+        if name in tainted_vars:
+            return {
+                "source": tainted_vars[name]["source"],
+                "path": list(tainted_vars[name].get("path") or []),
+            }
+    return None
+
+
+def _build_flow_display(source: str, path: list[object], sink: str) -> str:
+    chain = [source]
+    chain.extend(str(item) for item in path if item)
+    chain.append(sink)
+    return " -> ".join(chain)
 
 
 def _extract_snippet(text: str, start: int, end: int, window: int = 80) -> str:

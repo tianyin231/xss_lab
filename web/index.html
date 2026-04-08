@@ -291,6 +291,11 @@
             }
           }
 
+          function exportReport(format = 'html') {
+            if (!selectedJob.value?.id) return
+            window.location.href = `${apiBase.value}/jobs/${selectedJob.value.id}/export?format=${encodeURIComponent(format)}`
+          }
+
           function startResizeSidebar(e) {
             isResizingSidebar.value = true
             document.addEventListener('mousemove', handleResize)
@@ -463,7 +468,7 @@
             sidebarWidth, logsWidth, detailWidth, isResizingSidebar, isResizingLogs, isResizingDetail, isDetailView, selectedFinding, selectedPage, selectedAiReport, selectedVerification,
             activeModal,
             formatDateTime, selectedPageFindings, selectedPageHighlightedHtml,
-            fetchJobs, fetchReport, createJob, stopJob, deleteJob, analyzeJob, fetchAIReport,
+            fetchJobs, fetchReport, createJob, stopJob, deleteJob, analyzeJob, fetchAIReport, exportReport,
             startResizeSidebar, startResizeLogs, startResizeDetail, openModal, closeModal, toggleDetailView, selectFinding, selectPage, selectAiReport, selectVerification, updateFindingStatus
           }
         },
@@ -549,6 +554,7 @@
                   <button class="topActionBtn" :disabled="analyzing" @click="analyzeJob(selectedJob.id)">
                     {{ analyzing ? '分析中...' : 'AI分析' }}
                   </button>
+                  <button class="topActionBtn" @click="exportReport('html')">导出报告</button>
                 </div>
               </div>
 
@@ -608,10 +614,10 @@
                           </thead>
                           <tbody>
                             <tr v-for="(f, idx) in report.findings" :key="idx" class="clickable" :class="{ 'selected': selectedFinding && selectedFinding.title === f.title }" @click="isDetailView ? selectFinding(f) : openModal('finding', f)">
-                              <td><span class="pill" :class="'sev_' + f.severity">{{ f.severity }}</span></td>
+                              <td><span class="pill" :class="'sev_' + f.severity">{{ f.severity_label || f.severity }}</span></td>
                               <td><span class="pill" :class="'assessment_' + f.final_assessment">{{ f.final_assessment_label || f.final_assessment }}</span></td>
                               <td><span class="pill review-pill">{{ f.review_status_label || f.review_status }}</span></td>
-                              <td class="mono">{{ f.kind }}</td>
+                              <td class="mono">{{ f.kind_display || f.kind }}</td>
                               <td>{{ f.title }}</td>
                             </tr>
                           </tbody>
@@ -694,7 +700,7 @@
                             >
                               <td>
                                 <span class="pill" :class="'sev_' + (item.level === 'confirmed' ? 'high' : item.level === 'suspected' ? 'medium' : 'low')">
-                                  {{ item.level }}
+                                  {{ item.level_label || item.level }}
                                 </span>
                               </td>
                               <td class="mono">{{ item.vector }}</td>
@@ -724,7 +730,22 @@
                       <div class="modal-section">
                         <div class="modal-label">危险等级</div>
                         <div class="modal-value">
-                          <span class="pill" :class="'sev_' + selectedFinding.severity">{{ selectedFinding.severity }}</span>
+                          <span class="pill" :class="'sev_' + selectedFinding.severity">{{ selectedFinding.severity_label || selectedFinding.severity }}</span>
+                        </div>
+                      </div>
+                      <div class="modal-section" v-if="selectedFinding.linked_verification_results && selectedFinding.linked_verification_results.length">
+                        <div class="modal-label">关联动态验证</div>
+                        <div class="instance-list">
+                          <div class="instance-item" v-for="(verification, vidx) in selectedFinding.linked_verification_results" :key="'linked-verification-' + vidx">
+                            <div class="instance-meta">
+                              <span>{{ verification.level_label || verification.level }}</span>
+                              <span>{{ verification.vector }}</span>
+                              <span v-if="verification.parameter_name">{{ verification.parameter_name }}</span>
+                            </div>
+                            <div class="ast-flow-line"><strong>目标：</strong>{{ verification.target_url }}</div>
+                            <div class="ast-flow-line"><strong>结论：</strong>{{ verification.summary }}</div>
+                            <div class="ast-flow-line" v-if="verification.evidence"><strong>证据：</strong>{{ verification.evidence }}</div>
+                          </div>
                         </div>
                       </div>
                       <div class="modal-section">
@@ -740,7 +761,7 @@
                       </div>
                       <div class="modal-section">
                         <div class="modal-label">漏洞类型</div>
-                        <div class="modal-value">{{ selectedFinding.kind }}</div>
+                        <div class="modal-value">{{ selectedFinding.kind_display || selectedFinding.kind }}</div>
                       </div>
                       <div class="modal-section">
                         <div class="modal-label">最终判断</div>
@@ -785,12 +806,19 @@
                               <span v-if="item.label">标记：{{ item.label }}</span>
                             </div>
                             <div class="code-block">{{ item.snippet }}</div>
+                            <div v-if="item.flow_display || item.source || item.sink" class="ast-flow-block">
+                              <div class="ast-flow-title">AST 命中链路</div>
+                              <div class="ast-flow-line" v-if="item.source"><strong>输入源：</strong>{{ item.source }}</div>
+                              <div class="ast-flow-line" v-if="item.path && item.path.length"><strong>传播路径：</strong>{{ item.path.join(' -> ') }}</div>
+                              <div class="ast-flow-line" v-if="item.sink"><strong>危险汇点：</strong>{{ item.sink }}</div>
+                              <div class="ast-flow-line" v-if="item.flow_display"><strong>完整链路：</strong>{{ item.flow_display }}</div>
+                            </div>
                           </div>
                         </div>
                       </div>
                       <div class="modal-section" v-if="selectedFinding.confidence">
                         <div class="modal-label">置信度</div>
-                        <div class="modal-value">{{ selectedFinding.confidence }}</div>
+                        <div class="modal-value">{{ selectedFinding.confidence_label || selectedFinding.confidence }}</div>
                       </div>
                       <div class="modal-section" v-if="selectedFinding.final_assessment_reason">
                         <div class="modal-label">融合判断说明</div>
@@ -804,8 +832,8 @@
                         <div class="modal-label">风险分析</div>
                         <div class="modal-value">
                           <p>涉及页面数量：{{ selectedFinding.page_count || ((selectedFinding.urls && selectedFinding.urls.length) || 1) }}</p>
-                          <p>风险类型：{{ selectedFinding.kind }}</p>
-                          <p>严重程度：{{ selectedFinding.severity }}</p>
+                          <p>风险类型：{{ selectedFinding.kind_display || selectedFinding.kind }}</p>
+                          <p>严重程度：{{ selectedFinding.severity_label || selectedFinding.severity }}</p>
                           <p>{{ selectedFinding.reason || '该页面存在需要进一步复核的潜在风险信号。' }}</p>
                           <p>建议：{{ selectedFinding.recommendation || '请结合输入来源和输出位置继续确认风险。' }}</p>
                         </div>
@@ -856,7 +884,7 @@
                         <div class="modal-label">等级</div>
                         <div class="modal-value">
                           <span class="pill" :class="'sev_' + (selectedVerification.level === 'confirmed' ? 'high' : selectedVerification.level === 'suspected' ? 'medium' : 'low')">
-                            {{ selectedVerification.level }}
+                            {{ selectedVerification.level_label || selectedVerification.level }}
                           </span>
                         </div>
                       </div>
@@ -935,7 +963,7 @@
                           <div class="instance-item" v-for="(finding, idx) in selectedPageFindings" :key="'page-finding-' + idx">
                             <div class="instance-meta">
                               <span>{{ finding.title }}</span>
-                              <span>{{ finding.severity }}</span>
+                              <span>{{ finding.severity_label || finding.severity }}</span>
                               <span>{{ finding.instance_count }} 处</span>
                             </div>
                           </div>
@@ -987,7 +1015,7 @@
                     <div class="modal-section">
                       <div class="modal-label">危险等级</div>
                       <div class="modal-value">
-                        <span class="pill" :class="'sev_' + activeModal.data.severity">{{ activeModal.data.severity }}</span>
+                        <span class="pill" :class="'sev_' + activeModal.data.severity">{{ activeModal.data.severity_label || activeModal.data.severity }}</span>
                       </div>
                     </div>
                     <div class="modal-section">
@@ -1007,7 +1035,7 @@
                     </div>
                     <div class="modal-section" v-if="activeModal.data.confidence">
                       <div class="modal-label">置信度</div>
-                      <div class="modal-value">{{ activeModal.data.confidence }}</div>
+                      <div class="modal-value">{{ activeModal.data.confidence_label || activeModal.data.confidence }}</div>
                     </div>
                     <div class="modal-section" v-if="activeModal.data.reason">
                       <div class="modal-label">风险说明</div>
@@ -1082,7 +1110,7 @@
                       <div class="modal-label">等级</div>
                       <div class="modal-value">
                         <span class="pill" :class="'sev_' + (activeModal.data.level === 'confirmed' ? 'high' : activeModal.data.level === 'suspected' ? 'medium' : 'low')">
-                          {{ activeModal.data.level }}
+                          {{ activeModal.data.level_label || activeModal.data.level }}
                         </span>
                       </div>
                     </div>

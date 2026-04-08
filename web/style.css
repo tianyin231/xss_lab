@@ -700,6 +700,28 @@ body {
   margin-bottom: 0;
 }
 
+.ast-flow-block {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #eef2ff;
+  border: 1px solid rgba(99, 102, 241, 0.14);
+}
+
+.ast-flow-title {
+  font-size: 12px;
+  font-weight: 800;
+  color: #4338ca;
+  margin-bottom: 6px;
+}
+
+.ast-flow-line {
+  font-size: 12px;
+  color: #1e293b;
+  line-height: 1.7;
+  word-break: break-all;
+}
+
 .verify-list {
   display: flex;
   flex-direction: column;

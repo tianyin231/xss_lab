@@ -1,0 +1,1 @@
+{'url': 'http://127.0.0.1:5173/ast_data_flow_test.html?payload=Zxz_xss_payload', 'method': 'GET', 'status': 200, 'response_url': 'http://127.0.0.1:5173/ast_data_flow_test.html?payload=Zxz_xss_payload', 'timestamp': 1775654344.0903058}
