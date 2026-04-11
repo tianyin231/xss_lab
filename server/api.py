@@ -18,12 +18,14 @@ from flask import Blueprint, Response, jsonify, request
 from sqlalchemy import func
 
 from server.db import db
+from server.dynamic_verify import retest_finding, retest_page, suggest_payloads_for_finding, suggest_payloads_for_page
 from server.models import AIReport, DynamicVerification, Finding, FindingStatus, Job, Log, Page
 from server.report_export import build_export_filename, render_report_html, render_report_json
 from server.runner import bus, runner
 
 api_bp = Blueprint("api", __name__)
 BEIJING_TZ = timezone(timedelta(hours=8))
+UTC_TZ = timezone.utc
 
 
 @api_bp.get("")
@@ -311,6 +313,210 @@ def analyze_job(job_id: str) -> Response:
     return jsonify({"success": True, "reports": reports})
 
 
+@api_bp.post("/jobs/<job_id>/findings/retest")
+def retest_job_finding(job_id: str) -> Response:
+    job: Job | None = db.session.get(Job, job_id)
+    if job is None:
+        return jsonify({"error": "not found"}), 404
+
+    payload = request.get_json(force=True, silent=True) or {}
+    finding_kind = str(payload.get("kind") or "").strip()
+    finding_title = str(payload.get("title") or "").strip()
+    finding_url = str(payload.get("url") or "").strip()
+    finding_evidence = str(payload.get("evidence") or "").strip()
+    finding_severity = str(payload.get("severity") or "").strip() or "medium"
+    member_kinds = payload.get("member_kinds") or []
+    urls = payload.get("urls") or []
+    custom_payload = str(payload.get("payload") or "").strip() or None
+    vector = str(payload.get("vector") or "").strip() or None
+    use_selenium_raw = payload.get("use_selenium")
+    use_selenium = use_selenium_raw if isinstance(use_selenium_raw, bool) else None
+
+    if not finding_kind or not finding_title:
+        return jsonify({"error": "kind and title required"}), 400
+
+    finding = _locate_finding(
+        job_id=job_id,
+        finding_kind=finding_kind,
+        finding_title=finding_title,
+        finding_url=finding_url,
+        member_kinds=member_kinds if isinstance(member_kinds, list) else [],
+        urls=urls if isinstance(urls, list) else [],
+    )
+    if finding is None and finding_url:
+        finding = _build_virtual_finding(
+            job_id=job_id,
+            finding_url=finding_url,
+            finding_kind=finding_kind,
+            finding_title=finding_title,
+            finding_evidence=finding_evidence,
+            finding_severity=finding_severity,
+        )
+    if finding is None:
+        return jsonify({"error": "finding not found"}), 404
+
+    try:
+        records = retest_finding(
+            job_id=job_id,
+            finding=finding,
+            payload=custom_payload,
+            vector=vector,
+            use_selenium=use_selenium,
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:
+        db.session.add(Log(job_id=job_id, message=f"[单点复测] {finding.title} - {exc}"))
+        db.session.commit()
+        return jsonify({"error": str(exc)}), 500
+
+    db.session.add(
+        Log(
+            job_id=job_id,
+            message=f"[单点复测] {finding.title} -> {len(records)} 条结果",
+        )
+    )
+    db.session.commit()
+
+    return jsonify(
+        {
+            "ok": True,
+            "finding": {
+                "kind": finding.kind,
+                "title": finding.title,
+                "url": finding.url,
+            },
+            "results": [_serialize_runtime_verification(item) for item in records],
+        }
+    )
+
+
+@api_bp.post("/jobs/<job_id>/findings/payloads")
+def suggest_job_finding_payloads(job_id: str) -> Response:
+    job: Job | None = db.session.get(Job, job_id)
+    if job is None:
+        return jsonify({"error": "not found"}), 404
+
+    payload = request.get_json(force=True, silent=True) or {}
+    finding_kind = str(payload.get("kind") or "").strip()
+    finding_title = str(payload.get("title") or "").strip()
+    finding_url = str(payload.get("url") or "").strip()
+    finding_evidence = str(payload.get("evidence") or "").strip()
+    finding_severity = str(payload.get("severity") or "").strip() or "medium"
+    member_kinds = payload.get("member_kinds") or []
+    urls = payload.get("urls") or []
+    if not finding_kind or not finding_title:
+        return jsonify({"error": "kind and title required"}), 400
+
+    finding = _locate_finding(
+        job_id=job_id,
+        finding_kind=finding_kind,
+        finding_title=finding_title,
+        finding_url=finding_url,
+        member_kinds=member_kinds if isinstance(member_kinds, list) else [],
+        urls=urls if isinstance(urls, list) else [],
+    )
+    if finding is None and finding_url:
+        finding = _build_virtual_finding(
+            job_id=job_id,
+            finding_url=finding_url,
+            finding_kind=finding_kind,
+            finding_title=finding_title,
+            finding_evidence=finding_evidence,
+            finding_severity=finding_severity,
+        )
+    if finding is None:
+        return jsonify({"error": "finding not found"}), 404
+
+    return jsonify(
+        {
+            "ok": True,
+            "finding": {
+                "kind": finding.kind,
+                "title": finding.title,
+                "url": finding.url,
+            },
+            "payloads": suggest_payloads_for_finding(finding),
+        }
+    )
+
+
+@api_bp.post("/jobs/<job_id>/pages/retest")
+def retest_job_page(job_id: str) -> Response:
+    job: Job | None = db.session.get(Job, job_id)
+    if job is None:
+        return jsonify({"error": "not found"}), 404
+
+    payload = request.get_json(force=True, silent=True) or {}
+    page_url = str(payload.get("url") or "").strip()
+    custom_payload = str(payload.get("payload") or "").strip() or None
+    vector = str(payload.get("vector") or "").strip() or None
+    use_selenium_raw = payload.get("use_selenium")
+    use_selenium = use_selenium_raw if isinstance(use_selenium_raw, bool) else None
+    if not page_url:
+        return jsonify({"error": "url required"}), 400
+
+    page = Page.query.filter_by(job_id=job_id, url=page_url).order_by(Page.id.desc()).first()
+    if page is None:
+        return jsonify({"error": "page not found"}), 404
+
+    try:
+        records = retest_page(
+            job_id=job_id,
+            page=page,
+            payload=custom_payload,
+            vector=vector,
+            use_selenium=use_selenium,
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:
+        db.session.add(Log(job_id=job_id, message=f"[页面复测] {page.url} - {exc}"))
+        db.session.commit()
+        return jsonify({"error": str(exc)}), 500
+
+    db.session.add(Log(job_id=job_id, message=f"[页面复测] {page.url} -> {len(records)} 条结果"))
+    db.session.commit()
+    return jsonify(
+        {
+            "ok": True,
+            "page": {
+                "id": page.id,
+                "url": page.url,
+            },
+            "results": [_serialize_runtime_verification(item) for item in records],
+        }
+    )
+
+
+@api_bp.post("/jobs/<job_id>/pages/payloads")
+def suggest_job_page_payloads(job_id: str) -> Response:
+    job: Job | None = db.session.get(Job, job_id)
+    if job is None:
+        return jsonify({"error": "not found"}), 404
+
+    payload = request.get_json(force=True, silent=True) or {}
+    page_url = str(payload.get("url") or "").strip()
+    if not page_url:
+        return jsonify({"error": "url required"}), 400
+
+    page = Page.query.filter_by(job_id=job_id, url=page_url).order_by(Page.id.desc()).first()
+    if page is None:
+        return jsonify({"error": "page not found"}), 404
+
+    findings = Finding.query.filter_by(job_id=job_id, url=page.url).all()
+    return jsonify(
+        {
+            "ok": True,
+            "page": {
+                "id": page.id,
+                "url": page.url,
+            },
+            "payloads": suggest_payloads_for_page(page, findings),
+        }
+    )
+
+
 @api_bp.get("/jobs/<job_id>/ai-report")
 def get_ai_report(job_id: str) -> Response:
     job: Job | None = db.session.get(Job, job_id)
@@ -403,68 +609,6 @@ def _build_report_payload(job: Job) -> dict[str, object]:
     }
 
 
-def _group_findings(
-    findings: list[Finding],
-    verifications: list[DynamicVerification],
-    status_records: list[FindingStatus],
-) -> list[dict[str, object]]:
-    groups: dict[tuple[str, str], dict[str, object]] = {}
-    for finding in findings:
-        payload = _parse_evidence(finding.evidence)
-        payload["url"] = finding.url
-        family_key, family_title = _finding_family(finding.kind, finding.title, payload)
-        group = groups.setdefault(
-            (family_key, family_title),
-            {
-                "kind": family_key,
-                "severity": finding.severity,
-                "title": family_title,
-                "created_at": _to_beijing_iso(finding.created_at),
-                "instances": [],
-                "urls": set(),
-                "member_kinds": set(),
-            },
-        )
-        group["instances"].append(payload)
-        group["urls"].add(finding.url)
-        group["member_kinds"].add(finding.kind)
-        if _severity_score(finding.severity) > _severity_score(str(group["severity"])):
-            group["severity"] = finding.severity
-
-    status_map = {(item.finding_kind, item.finding_title): item for item in status_records}
-    grouped: list[dict[str, object]] = []
-    for group in groups.values():
-        reason, confidence, recommendation, evidence_type = _explain_finding(group["kind"], group["severity"])
-        instances = sorted(group["instances"], key=lambda item: (item.get("line") or 0, item.get("snippet") or ""))
-        urls = sorted(group["urls"])
-        lines = [str(item["line"]) for item in instances if item.get("line")]
-        summary = f"共命中 {len(instances)} 处，涉及 {len(urls)} 个页面"
-        if lines:
-            summary += f"，行号: {', '.join(lines[:8])}"
-        grouped.append(
-            {
-                "url": urls[0] if urls else "",
-                "urls": urls,
-                "page_count": len(urls),
-                "kind": group["kind"],
-                "kind_zh": _finding_kind_zh(str(group["kind"])),
-                "kind_display": _finding_kind_display(str(group["kind"])),
-                "member_kinds": sorted(group["member_kinds"]),
-                "severity": group["severity"],
-                "title": group["title"],
-                "summary": summary,
-                "evidence": instances[0].get("snippet") or "",
-                "instances": instances,
-                "instance_count": len(instances),
-                "reason": reason,
-                "confidence": confidence,
-                "recommendation": recommendation,
-                "evidence_type": evidence_type,
-                "created_at": group["created_at"],
-            }
-        )
-
-    return sorted(grouped, key=lambda item: (_severity_score(item["severity"]), item["title"]), reverse=True)
 
 
 def _parse_evidence(raw: str) -> dict[str, object]:
@@ -743,6 +887,115 @@ def _serialize_ai_report(item: AIReport) -> dict[str, object]:
     }
 
 
+def _serialize_runtime_verification(item) -> dict[str, object]:
+    detail = _parse_dynamic_evidence(json.dumps({"engine": item.engine, "detail": item.evidence}, ensure_ascii=False))
+    explanation = _explain_dynamic_verification(
+        item.vector,
+        item.status,
+        item.parameter_name,
+        detail["detail"],
+    )
+    return {
+        "page_id": item.page_id,
+        "page_url": item.page_url,
+        "target_url": item.target_url,
+        "vector": item.vector,
+        "parameter_name": item.parameter_name,
+        "payload": item.payload,
+        "status": item.status,
+        "engine": item.engine,
+        "level": explanation["level"],
+        "level_label": _dynamic_level_label(explanation["level"]),
+        "summary": explanation["summary"],
+        "risk": explanation["risk"],
+        "recommendation": explanation["recommendation"],
+        "evidence": detail["detail"],
+    }
+
+
+def _locate_finding(
+    job_id: str,
+    finding_kind: str,
+    finding_title: str,
+    finding_url: str,
+    member_kinds: list[object],
+    urls: list[object],
+) -> Finding | None:
+    direct = (
+        Finding.query.filter_by(job_id=job_id, kind=finding_kind, title=finding_title)
+        .order_by(Finding.id.asc())
+        .first()
+    )
+    if direct is not None:
+        return direct
+
+    normalized_kinds = [str(item).strip() for item in member_kinds if str(item).strip()]
+    normalized_urls = [str(item).strip() for item in urls if str(item).strip()]
+    if finding_url and finding_url not in normalized_urls:
+        normalized_urls.append(finding_url)
+
+    if normalized_kinds and normalized_urls:
+        match = (
+            Finding.query.filter(
+                Finding.job_id == job_id,
+                Finding.kind.in_(normalized_kinds),
+                Finding.url.in_(normalized_urls),
+            )
+            .order_by(Finding.id.asc())
+            .first()
+        )
+        if match is not None:
+            return match
+
+    if normalized_kinds:
+        match = (
+            Finding.query.filter(
+                Finding.job_id == job_id,
+                Finding.kind.in_(normalized_kinds),
+            )
+            .order_by(Finding.id.asc())
+            .first()
+        )
+        if match is not None:
+            return match
+
+    if normalized_urls:
+        match = (
+            Finding.query.filter(
+                Finding.job_id == job_id,
+                Finding.url.in_(normalized_urls),
+            )
+            .order_by(Finding.id.asc())
+            .first()
+        )
+        if match is not None:
+            return match
+
+    return (
+        Finding.query.filter_by(job_id=job_id, title=finding_title)
+        .order_by(Finding.id.asc())
+        .first()
+    )
+
+
+def _build_virtual_finding(
+    job_id: str,
+    finding_url: str,
+    finding_kind: str,
+    finding_title: str,
+    finding_evidence: str,
+    finding_severity: str,
+) -> Finding:
+    return Finding(
+        job_id=job_id,
+        url=finding_url,
+        kind=finding_kind,
+        severity=finding_severity,
+        title=finding_title,
+        evidence=finding_evidence or finding_title,
+    )
+
+
 def _build_dynamic_only_findings(
     grouped_findings: list[dict[str, object]],
     verifications: list[DynamicVerification],
@@ -952,7 +1205,7 @@ def _to_beijing_dt(value: datetime | None) -> datetime | None:
     if value is None:
         return None
     if value.tzinfo is None:
-        return value.replace(tzinfo=BEIJING_TZ)
+        value = value.replace(tzinfo=UTC_TZ)
     return value.astimezone(BEIJING_TZ)
 
 

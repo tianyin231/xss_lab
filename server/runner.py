@@ -16,11 +16,13 @@ from app_config import get_bool
 from server.db import db
 from server.dynamic_verify import run_dynamic_verification
 from server.events import EventBus
-from server.models import DynamicVerification, Finding, Job, JobStatus, Log, Page
+from server.models import Finding, Job, JobStatus, Log, Page
 from server.worker import parse_job_spec, run_worker
 
 
 class JobRunner:
+    _COMMIT_BATCH_SIZE = 25
+
     def __init__(self, bus: EventBus) -> None:
         self._bus = bus
         self._lock = threading.Lock()
@@ -53,7 +55,7 @@ class JobRunner:
                 return
 
             job.status = JobStatus.running.value
-            job.started_at = datetime.now()
+            job.started_at = datetime.utcnow()
             db.session.commit()
 
             out_queue: mp.Queue = mp.Queue()
@@ -103,16 +105,18 @@ class JobRunner:
         job: Job | None = db.session.get(Job, job_id)
         if job is not None and job.status == JobStatus.running.value:
             job.status = JobStatus.stopped.value
-            job.finished_at = datetime.now()
+            job.finished_at = datetime.utcnow()
             db.session.commit()
             self._bus.publish(job_id, "job", {"status": job.status})
 
     def _consume_events(self, app: Any, job_id: str, out_queue: mp.Queue) -> None:
+        pending_writes = 0
         with app.app_context():
             while True:
                 try:
                     msg: dict[str, Any] = out_queue.get(timeout=0.5)
                 except Exception:
+                    pending_writes = self._flush_writes(pending_writes)
                     proc = self._procs.get(job_id)
                     if proc is None:
                         return
@@ -125,19 +129,21 @@ class JobRunner:
                 data = dict(msg.get("data") or {})
 
                 if msg_type == "page":
-                    self._persist_page(job_id, data)
+                    pending_writes += self._persist_page(job_id, data)
                 elif msg_type == "finding":
-                    self._persist_finding(job_id, data)
+                    pending_writes += self._persist_finding(job_id, data)
                 elif msg_type == "log":
-                    self._persist_log(job_id, data)
+                    pending_writes += self._persist_log(job_id, data)
                     self._bus.publish(job_id, "log", data)
                 elif msg_type == "error":
-                    self._persist_log(job_id, {"message": f"ERROR: {data.get('message')}"})
+                    pending_writes += self._persist_log(job_id, {"message": f"ERROR: {data.get('message')}"})
+                    pending_writes = self._flush_writes(pending_writes)
                     self._bus.publish(job_id, "error", data)
                     self._finalize_if_needed(job_id=job_id, status=JobStatus.failed.value, error=data.get("message"))
                     return
                 elif msg_type == "done":
-                    self._persist_log(job_id, {"message": "done"})
+                    pending_writes += self._persist_log(job_id, {"message": "done"})
+                    pending_writes = self._flush_writes(pending_writes)
                     self._bus.publish(job_id, "log", {"message": "done"})
                     if get_bool("DYNAMIC_VERIFY_ENABLED", False):
                         try:
@@ -150,10 +156,13 @@ class JobRunner:
                     self._finalize_if_needed(job_id=job_id, status=JobStatus.finished.value, error=None)
                     return
                 else:
-                    self._persist_log(job_id, data)
+                    pending_writes += self._persist_log(job_id, data)
                     self._bus.publish(job_id, msg_type, data)
 
-    def _persist_page(self, job_id: str, data: dict[str, Any]) -> None:
+                if pending_writes >= self._COMMIT_BATCH_SIZE:
+                    pending_writes = self._flush_writes(pending_writes)
+
+    def _persist_page(self, job_id: str, data: dict[str, Any]) -> int:
         page = Page(
             job_id=job_id,
             url=str(data.get("url") or ""),
@@ -163,9 +172,9 @@ class JobRunner:
             sha256=str(data.get("sha256") or "") or None,
         )
         db.session.add(page)
-        db.session.commit()
+        return 1
 
-    def _persist_finding(self, job_id: str, data: dict[str, Any]) -> None:
+    def _persist_finding(self, job_id: str, data: dict[str, Any]) -> int:
         finding = Finding(
             job_id=job_id,
             url=str(data.get("url") or ""),
@@ -175,22 +184,29 @@ class JobRunner:
             evidence=str(data.get("evidence") or ""),
         )
         db.session.add(finding)
-        db.session.commit()
+        return 1
 
-    def _persist_log(self, job_id: str, data: dict[str, Any]) -> None:
+    def _persist_log(self, job_id: str, data: dict[str, Any]) -> int:
         msg = str(data.get("message") or "")
         if not msg:
-            return
+            return 0
         log = Log(
             job_id=job_id,
             message=msg,
         )
         db.session.add(log)
-        db.session.commit()
+        return 1
 
     def _persist_dynamic_log(self, job_id: str, message: str) -> None:
-        self._persist_log(job_id, {"message": message})
+        pending_writes = self._persist_log(job_id, {"message": message})
+        self._flush_writes(pending_writes)
         self._bus.publish(job_id, "log", {"message": message})
+
+    def _flush_writes(self, pending_writes: int) -> int:
+        if pending_writes <= 0:
+            return 0
+        db.session.commit()
+        return 0
 
     def _finalize_if_needed(self, job_id: str, status: str, error: str | None) -> None:
         job: Job | None = db.session.get(Job, job_id)

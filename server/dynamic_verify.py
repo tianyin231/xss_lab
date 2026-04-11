@@ -107,6 +107,196 @@ def run_dynamic_verification(job_id: str, log: Callable[[str], None] | None = No
     return len(records)
 
 
+def retest_finding(
+    job_id: str,
+    finding: Finding,
+    payload: str | None = None,
+    vector: str | None = None,
+    use_selenium: bool | None = None,
+) -> list[VerificationRecord]:
+    page = Page.query.filter_by(job_id=job_id, url=finding.url).order_by(Page.id.desc()).first()
+    if page is None:
+        raise ValueError("page not found for finding")
+
+    payload_text = str(payload or get("DYNAMIC_VERIFY_PAYLOAD", "xsslab_verify_payload_2026"))
+    timeout = get_float("DYNAMIC_VERIFY_TIMEOUT", 15.0)
+    wait_seconds = get_float("DYNAMIC_VERIFY_WAIT_SECONDS", 2.0)
+    trust_env = get_bool("DYNAMIC_VERIFY_TRUST_ENV", False)
+    ssl_verify = get_bool("DYNAMIC_VERIFY_SSL_VERIFY", False)
+    job = db.session.get(Job, job_id)
+    selenium_enabled = (
+        use_selenium
+        if use_selenium is not None
+        else (get_bool("DYNAMIC_VERIFY_USE_SELENIUM", False) or bool(job.use_selenium if job else False))
+    )
+
+    planned_vectors = _plan_verification_vectors(page, [finding])
+    if vector:
+        normalized_vector = str(vector).strip().lower()
+        if normalized_vector not in {"query", "form", "hash"}:
+            raise ValueError("unsupported vector")
+        planned_vectors = [item for item in planned_vectors if item == normalized_vector]
+        if not planned_vectors:
+            raise ValueError("requested vector is not applicable for this finding")
+
+    if not planned_vectors:
+        raise ValueError("no verification vector available for this finding")
+
+    records: list[VerificationRecord] = []
+    driver = _init_driver(timeout) if selenium_enabled else None
+    try:
+        with httpx.Client(timeout=timeout, follow_redirects=True, trust_env=trust_env, verify=ssl_verify) as client:
+            for current_vector in planned_vectors:
+                if current_vector == "query":
+                    records.extend(_verify_query(client, driver, page, payload_text, wait_seconds))
+                elif current_vector == "form":
+                    records.extend(_verify_forms(client, driver, page, payload_text, wait_seconds))
+                elif current_vector == "hash":
+                    records.extend(_verify_hash(page, payload_text, driver is not None))
+    finally:
+        if driver is not None:
+            try:
+                driver.quit()
+            except Exception:
+                pass
+
+    return records
+
+
+def retest_page(
+    job_id: str,
+    page: Page,
+    payload: str | None = None,
+    vector: str | None = None,
+    use_selenium: bool | None = None,
+) -> list[VerificationRecord]:
+    payload_text = str(payload or get("DYNAMIC_VERIFY_PAYLOAD", "xsslab_verify_payload_2026"))
+    timeout = get_float("DYNAMIC_VERIFY_TIMEOUT", 15.0)
+    wait_seconds = get_float("DYNAMIC_VERIFY_WAIT_SECONDS", 2.0)
+    trust_env = get_bool("DYNAMIC_VERIFY_TRUST_ENV", False)
+    ssl_verify = get_bool("DYNAMIC_VERIFY_SSL_VERIFY", False)
+    job = db.session.get(Job, job_id)
+    selenium_enabled = (
+        use_selenium
+        if use_selenium is not None
+        else (get_bool("DYNAMIC_VERIFY_USE_SELENIUM", False) or bool(job.use_selenium if job else False))
+    )
+    findings = Finding.query.filter_by(job_id=job_id, url=page.url).all()
+    planned_vectors = _plan_verification_vectors(page, findings)
+    if vector:
+        normalized_vector = str(vector).strip().lower()
+        if normalized_vector not in {"query", "form", "hash"}:
+            raise ValueError("unsupported vector")
+        planned_vectors = [item for item in planned_vectors if item == normalized_vector]
+        if not planned_vectors:
+            raise ValueError("requested vector is not applicable for this page")
+
+    if not planned_vectors:
+        raise ValueError("no verification vector available for this page")
+
+    records: list[VerificationRecord] = []
+    driver = _init_driver(timeout) if selenium_enabled else None
+    try:
+        with httpx.Client(timeout=timeout, follow_redirects=True, trust_env=trust_env, verify=ssl_verify) as client:
+            for current_vector in planned_vectors:
+                if current_vector == "query":
+                    records.extend(_verify_query(client, driver, page, payload_text, wait_seconds))
+                elif current_vector == "form":
+                    records.extend(_verify_forms(client, driver, page, payload_text, wait_seconds))
+                elif current_vector == "hash":
+                    records.extend(_verify_hash(page, payload_text, driver is not None))
+    finally:
+        if driver is not None:
+            try:
+                driver.quit()
+            except Exception:
+                pass
+
+    return records
+
+
+def suggest_payloads_for_finding(finding: Finding) -> list[dict[str, str]]:
+    evidence = _parse_finding_evidence(finding.evidence)
+    text = " ".join(
+        [
+            finding.kind,
+            finding.title,
+            str(evidence.get("label") or ""),
+            str(evidence.get("snippet") or ""),
+            str(evidence.get("source") or ""),
+            str(evidence.get("flow_display") or ""),
+        ]
+    ).lower()
+
+    suggestions: list[dict[str, str]] = []
+
+    def add(label: str, payload: str, vector: str = "") -> None:
+        item = {
+            "label": label,
+            "payload": payload,
+            "vector": vector,
+        }
+        if item not in suggestions:
+            suggestions.append(item)
+
+    if any(token in text for token in ("innerhtml", "document.write", "html()", "insertadjacenthtml", "srcdoc")):
+        add("HTML 标签注入", "<img src=x onerror=alert(1)>")
+        add("SVG 事件注入", "<svg onload=alert(1)>")
+
+    if any(token in text for token in ("onclick", "onerror", "onload", "inline_event", "html_attr")):
+        add("属性闭合注入", '" autofocus onfocus=alert(1) x="')
+        add("单引号属性注入", "' onmouseover='alert(1)' x='")
+
+    if any(token in text for token in ("location.search", "query", "document.url", "location.href")):
+        add("查询参数反射", "<img src=x onerror=alert(1)>", "query")
+        add("查询参数属性逃逸", '" onmouseover="alert(1)', "query")
+
+    if any(token in text for token in ("location.hash", "hashchange")):
+        add("Hash 片段注入", "<svg onload=alert(1)>", "hash")
+
+    if any(token in text for token in ("form", "input", "textarea", "select")):
+        add("表单回显注入", "<img src=x onerror=alert(1)>", "form")
+        add("表单属性逃逸", '" autofocus onfocus=alert(1) x="', "form")
+
+    if any(token in text for token in ("eval", "settimeout", "setinterval", "new function", "script")):
+        add("JS 字符串闭合", '";alert(1);//')
+        add("JS 单引号闭合", "';alert(1);//")
+
+    if any(token in text for token in ("javascript:", "href", "src")):
+        add("协议执行", "javascript:alert(1)")
+
+    add("基础探针", "xsslab_probe_2026")
+
+    return suggestions[:8]
+
+
+def suggest_payloads_for_page(page: Page, findings: list[Finding]) -> list[dict[str, str]]:
+    suggestions: list[dict[str, str]] = []
+
+    def add(label: str, payload: str, vector: str = "") -> None:
+        item = {
+            "label": label,
+            "payload": payload,
+            "vector": vector,
+        }
+        if item not in suggestions:
+            suggestions.append(item)
+
+    for finding in findings:
+        for item in suggest_payloads_for_finding(finding):
+            add(str(item["label"]), str(item["payload"]), str(item.get("vector") or ""))
+
+    split_result = urlsplit(page.url)
+    if parse_qsl(split_result.query, keep_blank_values=True):
+        add("页面查询参数", "<img src=x onerror=alert(1)>", "query")
+    if "<form" in (page.content or "").lower():
+        add("页面表单注入", "<img src=x onerror=alert(1)>", "form")
+    if any(signal in (page.content or "") for signal in ("location.hash", "hashchange", "decodeURIComponent(location.hash)")):
+        add("页面 Hash 注入", "<svg onload=alert(1)>", "hash")
+    add("基础探针", "xsslab_probe_2026")
+    return suggestions[:8]
+
+
 def _verify_query(
     client: httpx.Client, driver: webdriver.Remote | None, page: Page, payload: str, wait_seconds: float
 ) -> list[VerificationRecord]:

@@ -4,6 +4,8 @@ from __future__ import annotations
 import enum
 from datetime import datetime
 
+from sqlalchemy import Index, UniqueConstraint
+
 from server.db import db
 
 
@@ -17,6 +19,9 @@ class JobStatus(str, enum.Enum):
 
 class Job(db.Model):
     __tablename__ = "jobs"
+    __table_args__ = (
+        Index("ix_jobs_status_created_at", "status", "created_at"),
+    )
 
     id = db.Column(db.String(36), primary_key=True)
     target_url = db.Column(db.Text, nullable=False)
@@ -27,13 +32,16 @@ class Job(db.Model):
     status = db.Column(db.String(32), nullable=False, default=JobStatus.queued.value)
     error = db.Column(db.Text, nullable=True)
 
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.now)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     started_at = db.Column(db.DateTime, nullable=True)
     finished_at = db.Column(db.DateTime, nullable=True)
 
 
 class Page(db.Model):
     __tablename__ = "pages"
+    __table_args__ = (
+        Index("ix_pages_job_id_id", "job_id", "id"),
+    )
 
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     job_id = db.Column(db.String(36), index=True, nullable=False)
@@ -42,11 +50,15 @@ class Page(db.Model):
     content_type = db.Column(db.String(255), nullable=True)
     content = db.Column(db.Text, nullable=True)
     sha256 = db.Column(db.String(64), nullable=True)
-    fetched_at = db.Column(db.DateTime, nullable=False, default=datetime.now)
+    fetched_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
 
 class Finding(db.Model):
     __tablename__ = "findings"
+    __table_args__ = (
+        Index("ix_findings_job_id_url", "job_id", "url"),
+        Index("ix_findings_job_id_kind", "job_id", "kind"),
+    )
 
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     job_id = db.Column(db.String(36), index=True, nullable=False)
@@ -55,20 +67,26 @@ class Finding(db.Model):
     severity = db.Column(db.String(16), nullable=False)
     title = db.Column(db.String(255), nullable=False)
     evidence = db.Column(db.Text, nullable=False)
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.now)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
 
 class Log(db.Model):
     __tablename__ = "logs"
+    __table_args__ = (
+        Index("ix_logs_job_id_id", "job_id", "id"),
+    )
 
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     job_id = db.Column(db.String(36), index=True, nullable=False)
     message = db.Column(db.Text, nullable=False)
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.now)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
 
 class AIReport(db.Model):
     __tablename__ = "ai_reports"
+    __table_args__ = (
+        Index("ix_ai_reports_job_id_page_id", "job_id", "page_id"),
+    )
 
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     job_id = db.Column(db.String(36), index=True, nullable=False)
@@ -81,11 +99,15 @@ class AIReport(db.Model):
     suggestions = db.Column(db.Text, nullable=True)
     risk_assessment = db.Column(db.Text, nullable=True)
     full_report = db.Column(db.Text, nullable=False)
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.now)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
 
 class DynamicVerification(db.Model):
     __tablename__ = "dynamic_verifications"
+    __table_args__ = (
+        Index("ix_dynamic_verifications_job_id_page_url", "job_id", "page_url"),
+        Index("ix_dynamic_verifications_job_id_vector", "job_id", "vector"),
+    )
 
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     job_id = db.Column(db.String(36), index=True, nullable=False)
@@ -97,11 +119,15 @@ class DynamicVerification(db.Model):
     payload = db.Column(db.Text, nullable=False)
     status = db.Column(db.String(32), nullable=False)
     evidence = db.Column(db.Text, nullable=True)
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.now)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
 
 class FindingStatus(db.Model):
     __tablename__ = "finding_statuses"
+    __table_args__ = (
+        UniqueConstraint("job_id", "finding_kind", "finding_title", name="uq_finding_status_job_kind_title"),
+        Index("ix_finding_statuses_job_id_kind_title", "job_id", "finding_kind", "finding_title"),
+    )
 
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     job_id = db.Column(db.String(36), index=True, nullable=False)
@@ -109,5 +135,5 @@ class FindingStatus(db.Model):
     finding_title = db.Column(db.String(255), nullable=False)
     status = db.Column(db.String(32), nullable=False, default="open")
     note = db.Column(db.Text, nullable=True)
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.now)
-    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
