@@ -74,7 +74,7 @@ export const APP_TEMPLATE = `
                   <div class="muted" v-if="currentView === 'help'">解释系统中的名词、原理、结果和常见问题</div>
                   <div class="muted" v-else-if="selectedJob">{{ selectedJob.target_url }}</div>
                 </div>
-                <div class="actions" v-if="currentView !== 'help' && selectedJob">
+                <div class="actions" v-if="currentView === 'dashboard' && selectedJob">
                   <button class="topActionBtn" v-if="selectedJob.status === 'running'" @click="stopJob(selectedJob.id)">停止</button>
                   <button class="topActionBtn" @click="toggleDetailView">
                     {{ isDetailView ? '返回' : '详细视图' }}
@@ -84,6 +84,11 @@ export const APP_TEMPLATE = `
                     {{ analyzing ? '分析中...' : 'AI分析' }}
                   </button>
                   <button class="topActionBtn" @click="exportReport('html')">导出报告</button>
+                  <button class="topActionBtn" @click="openWorkbenchHome()">工作台</button>
+                  <button class="topActionBtn topActionBtnSecondary" @click="toggleHelpView()">帮助</button>
+                </div>
+                <div class="actions" v-else-if="currentView === 'dashboard'">
+                  <button class="topActionBtn" @click="openWorkbenchHome()">工作台</button>
                   <button class="topActionBtn topActionBtnSecondary" @click="toggleHelpView()">帮助</button>
                 </div>
                 <div class="actions" v-else-if="currentView === 'help'">
@@ -170,6 +175,7 @@ export const APP_TEMPLATE = `
                               <th style="width: 60px">状态</th>
                               <th style="width: 120px">类型</th>
                               <th>URL</th>
+                              <th style="width: 96px">工作台</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -177,6 +183,7 @@ export const APP_TEMPLATE = `
                               <td class="mono">{{ p.status_code }}</td>
                               <td class="mono">{{ p.content_type }}</td>
                               <td class="mono">{{ p.url }}</td>
+                              <td><button class="tableActionBtn" @click.stop="openPageWorkbenchRedirect(p)">进入</button></td>
                             </tr>
                           </tbody>
                         </table>
@@ -493,6 +500,9 @@ export const APP_TEMPLATE = `
                         </div>
                       </div>
                       <div class="modal-section">
+                        <button class="topActionBtn topActionBtnSecondary" @click="openPageWorkbenchRedirect(selectedPage)">打开页面验证工作台</button>
+                      </div>
+                      <div class="modal-section">
                         <div class="modal-label">页面复测</div>
                         <div class="retest-card">
                           <div class="retest-toolbar">
@@ -748,6 +758,9 @@ export const APP_TEMPLATE = `
                     <div class="modal-section">
                       <div class="modal-label">查看提示</div>
                       <div class="modal-value">普通视图下仅展示页面概要，切换到详细视图后可查看完整源码和更多信息。</div>
+                    </div>
+                    <div class="modal-section">
+                      <button class="topActionBtn topActionBtnSecondary" @click="openPageWorkbenchRedirect(activeModal.data)">打开页面验证工作台</button>
                     </div>
                   </template>
                 </div>

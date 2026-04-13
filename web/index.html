@@ -33,6 +33,15 @@
           const findingPayloadSuggestionsLoading = ref(false)
           const findingRetestFeedback = ref('')
           const currentView = ref('dashboard')
+          const workbenchData = ref(null)
+          const workbenchLoading = ref(false)
+          const workbenchError = ref('')
+          const workbenchRetesting = ref(false)
+          const workbenchRetestResults = ref([])
+          const workbenchRetestFeedback = ref('')
+          const workbenchSelectedPreset = ref('__default__')
+          const workbenchSelectedVector = ref('')
+          const workbenchCustomPayload = ref('')
           const helpQuery = ref('')
           const helpCategory = ref('all')
           const expandedHelpIds = ref(['term_xss', 'workflow_scan', 'result_confidence'])
@@ -66,6 +75,40 @@
           let es = null
           let reportTimer = null
 
+          function buildWorkbenchUrl(jobId, pageUrl) {
+            const params = new URLSearchParams(window.location.search)
+            params.set('view', 'workbench')
+            params.set('job_id', jobId)
+            params.set('page_url', pageUrl)
+            return `${window.location.pathname}?${params.toString()}`
+          }
+
+          function buildDashboardUrl() {
+            const params = new URLSearchParams(window.location.search)
+            params.delete('view')
+            params.delete('job_id')
+            params.delete('page_url')
+            const query = params.toString()
+            return query ? `${window.location.pathname}?${query}` : window.location.pathname
+          }
+
+          function syncWorkbenchRoute(jobId, pageUrl) {
+            window.history.replaceState({}, '', buildWorkbenchUrl(jobId, pageUrl))
+          }
+
+          function syncDashboardRoute() {
+            window.history.replaceState({}, '', buildDashboardUrl())
+          }
+
+          function readWorkbenchRoute() {
+            const params = new URLSearchParams(window.location.search)
+            const view = (params.get('view') || '').trim()
+            const jobId = (params.get('job_id') || '').trim()
+            const pageUrl = (params.get('page_url') || '').trim()
+            if (view !== 'workbench' || !jobId || !pageUrl) return null
+            return { jobId, pageUrl }
+          }
+
           const selectedJob = computed(() => jobs.value.find(j => j.id === selectedJobId.value) || null)
           const selectedPageFindings = computed(() => {
             if (!selectedPage.value?.url || !report.value?.findings?.length) return []
@@ -87,6 +130,21 @@
               { value: '__default__', label: '系统默认 Payload', payload: '', vector: '' },
             ]
             for (const item of findingPayloadSuggestions.value || []) {
+              options.push({
+                value: `suggested:${item.label}:${item.vector || ''}:${item.payload}`,
+                label: item.vector ? `${item.label} (${item.vector})` : item.label,
+                payload: item.payload || '',
+                vector: item.vector || '',
+              })
+            }
+            options.push({ value: '__custom__', label: '自定义 Payload', payload: '', vector: '' })
+            return options
+          })
+          const workbenchRetestPayloadOptions = computed(() => {
+            const options = [
+              { value: '__default__', label: '系统默认 Payload', payload: '', vector: '' },
+            ]
+            for (const item of workbenchData.value?.payloads || []) {
               options.push({
                 value: `suggested:${item.label}:${item.vector || ''}:${item.payload}`,
                 label: item.vector ? `${item.label} (${item.vector})` : item.label,
@@ -375,6 +433,102 @@
             return await res.json()
           }
 
+          async function fetchPageWorkbench(url) {
+            if (!selectedJobId.value || !url) throw new Error('缺少页面地址')
+            const endpoint = `${apiBase.value}/jobs/${selectedJobId.value}/pages/workbench?url=${encodeURIComponent(url)}`
+            const res = await fetch(endpoint)
+            const body = await res.json()
+            if (!res.ok) throw new Error(body.error || '获取页面工作台失败')
+            return body
+          }
+
+          async function fetchWorkbenchUrl(jobId = '', pageUrl = '') {
+            const params = new URLSearchParams()
+            if (jobId) params.set('job_id', jobId)
+            if (pageUrl) params.set('page_url', pageUrl)
+            const suffix = params.toString() ? `?${params.toString()}` : ''
+            const res = await fetch(`${apiBase.value}/workbench/url${suffix}`)
+            const body = await res.json()
+            if (!res.ok) throw new Error(body.error || '获取工作台地址失败')
+            return body.url
+          }
+
+          function resetWorkbenchRetestState() {
+            workbenchRetestResults.value = []
+            workbenchRetestFeedback.value = ''
+            workbenchSelectedPreset.value = '__default__'
+            workbenchSelectedVector.value = ''
+            workbenchCustomPayload.value = ''
+          }
+
+          async function openWorkbenchHome() {
+            try {
+              const url = await fetchWorkbenchUrl()
+              window.location.href = url
+            } catch (err) {
+              alert(`打开工作台失败: ${err.message}`)
+            }
+          }
+
+          async function openPageWorkbench(page) {
+            const pageUrl = typeof page === 'string' ? page : page?.url
+            if (!pageUrl) return
+            workbenchLoading.value = true
+            workbenchError.value = ''
+            try {
+              if (!selectedJobId.value) {
+                throw new Error('缺少任务上下文')
+              }
+              workbenchData.value = await fetchPageWorkbench(pageUrl)
+              closeModal()
+              currentView.value = 'page-workbench'
+              syncWorkbenchRoute(selectedJobId.value, pageUrl)
+              resetWorkbenchRetestState()
+            } catch (err) {
+              workbenchError.value = err.message
+              alert(`打开页面工作台失败: ${err.message}`)
+            } finally {
+              workbenchLoading.value = false
+            }
+          }
+
+          async function openPageWorkbenchRedirect(page) {
+            const pageUrl = typeof page === 'string' ? page : page?.url
+            if (!selectedJobId.value) {
+              alert('请先选择任务')
+              return
+            }
+            if (!pageUrl) return
+            try {
+              const url = await fetchWorkbenchUrl(selectedJobId.value, pageUrl)
+              window.location.href = url
+            } catch (err) {
+              alert(`打开页面工作台失败: ${err.message}`)
+            }
+          }
+
+          async function refreshWorkbench() {
+            if (!workbenchData.value?.page?.url) return
+            workbenchLoading.value = true
+            workbenchError.value = ''
+            try {
+              workbenchData.value = await fetchPageWorkbench(workbenchData.value.page.url)
+              if (selectedJobId.value) {
+                syncWorkbenchRoute(selectedJobId.value, workbenchData.value.page.url)
+              }
+            } catch (err) {
+              workbenchError.value = err.message
+              alert(`刷新页面工作台失败: ${err.message}`)
+            } finally {
+              workbenchLoading.value = false
+            }
+          }
+
+          function closeWorkbench() {
+            currentView.value = 'dashboard'
+            syncDashboardRoute()
+          }
+
 
           function closeModal() {
             activeModal.value = null
@@ -527,6 +681,61 @@
             await retestSelectedFinding(payload, vector)
           }
 
+          function applyWorkbenchRetestPreset() {
+            const option = workbenchRetestPayloadOptions.value.find(item => item.value === workbenchSelectedPreset.value)
+            if (!option) return
+            if (workbenchSelectedPreset.value !== '__custom__') {
+              workbenchCustomPayload.value = ''
+            }
+            if (!workbenchSelectedVector.value && option.vector) {
+              workbenchSelectedVector.value = option.vector
+            }
+          }
+
+          async function runWorkbenchRetest() {
+            if (!selectedJobId.value || !workbenchData.value?.page?.url) return
+
+            let payload = ''
+            let vector = workbenchSelectedVector.value || ''
+            const option = workbenchRetestPayloadOptions.value.find(item => item.value === workbenchSelectedPreset.value)
+            if (workbenchSelectedPreset.value === '__custom__') {
+              payload = workbenchCustomPayload.value.trim()
+            } else if (option) {
+              payload = option.payload || ''
+              if (!vector && option.vector) {
+                vector = option.vector
+              }
+            }
+
+            workbenchRetesting.value = true
+            workbenchRetestFeedback.value = '正在执行页面复测...'
+            try {
+              const res = await fetch(`${apiBase.value}/jobs/${selectedJobId.value}/pages/retest`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  url: workbenchData.value.page.url,
+                  payload,
+                  vector,
+                })
+              })
+              const body = await res.json()
+              if (!res.ok) throw new Error(body.error || '页面复测失败')
+              workbenchRetestResults.value = body.results || []
+              workbenchRetestFeedback.value = `页面复测完成，已生成 ${workbenchRetestResults.value.length} 条结果。`
+              logs.value.push({
+                ts: Date.now() / 1000,
+                message: `[页面工作台] ${workbenchData.value.page.url} -> ${workbenchRetestResults.value.length} 条复测结果`
+              })
+              await refreshWorkbench()
+            } catch (err) {
+              workbenchRetestFeedback.value = `页面复测失败：${err.message}`
+              alert(`页面复测失败: ${err.message}`)
+            } finally {
+              workbenchRetesting.value = false
+            }
+          }
+
           async function selectPage(page) {
             try {
               const pageDetail = page.id ? await fetchPageDetail(page.id) : page
@@ -623,19 +832,27 @@
             selectedRetestPreset.value = '__default__'
             selectedRetestVector.value = ''
             customRetestPayload.value = ''
+            workbenchData.value = null
+            workbenchError.value = ''
+            resetWorkbenchRetestState()
+            if (currentView.value !== 'help') currentView.value = 'dashboard'
             attachEvents(jobId)
           })
 
           return {
             apiBase, jobs, selectedJobId, selectedJob, logs, report, aiReport, form, creating, analyzing,
             currentView, helpQuery, helpCategory, helpCategories, filteredHelpSections, helpSections, helpEntryCount, helpCategoryLabel,
+            workbenchData, workbenchLoading, workbenchError, workbenchRetesting, workbenchRetestResults, workbenchRetestFeedback,
+            workbenchSelectedPreset, workbenchSelectedVector, workbenchCustomPayload, workbenchRetestPayloadOptions,
             sidebarWidth, logsWidth, detailWidth, isResizingSidebar, isResizingLogs, isResizingDetail, isDetailView, selectedFinding, selectedPage, selectedAiReport, selectedVerification,
             retestingFinding, findingRetestResults, findingPayloadSuggestions, findingPayloadSuggestionsLoading, findingRetestFeedback,
             selectedRetestPreset, selectedRetestVector, customRetestPayload, retestPayloadOptions,
             activeModal,
             formatDateTime, selectedPageFindings, selectedPageHighlightedHtml,
             fetchJobs, fetchReport, createJob, stopJob, deleteJob, analyzeJob, fetchAIReport, exportReport,
-            startResizeSidebar, startResizeLogs, startResizeDetail, openModal, closeModal, toggleDetailView, selectFinding, selectPage, selectAiReport, selectVerification, updateFindingStatus, retestSelectedFinding, runRetestFromControls, applyRetestPreset, toggleHelpView, toggleHelpItem, isHelpItemExpanded
+            startResizeSidebar, startResizeLogs, startResizeDetail, openModal, closeModal, toggleDetailView, selectFinding, selectPage, selectAiReport, selectVerification, updateFindingStatus, retestSelectedFinding, runRetestFromControls, applyRetestPreset, toggleHelpView, toggleHelpItem, isHelpItemExpanded,
+            openWorkbenchHome, openPageWorkbenchRedirect,
+            openPageWorkbench, closeWorkbench, refreshWorkbench, runWorkbenchRetest, applyWorkbenchRetestPreset
           }
         },
         template: APP_TEMPLATE

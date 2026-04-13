@@ -530,6 +530,24 @@ export const HELP_SECTIONS = [
         ],
         tags: ['单点复测', '自动选择', '向量判断', '推荐逻辑'],
         resources: []
+      },
+      {
+        id: 'principle_reflection_context',
+        q: '什么是回显定位和上下文提示？',
+        a: '回显定位是看 payload 有没有出现在响应里；上下文提示则是在说明它大概落在 HTML 文本、属性、脚本还是其他位置。',
+        details: [
+          '如果 payload 被直接回显，系统会尽量判断它更像出现在 HTML 文本、HTML 属性、script 代码块或注释附近。',
+          '这个判断是轻量级的，不等于完整浏览器执行证明，但能帮助你更快知道“输入到底被带到了哪里”。',
+          '上下文提示的意义在于帮助你选择下一步更合适的 payload 和人工复核方向，而不是直接替代全部漏洞判断。'
+        ],
+        bullets: [
+          '回显定位回答“payload 有没有被带回来”。',
+          '上下文提示回答“payload 大概落在什么位置”。'
+        ],
+        tags: ['回显定位', '上下文提示', '单点复测'],
+        resources: [
+          { label: 'PortSwigger: XSS contexts', href: 'https://portswigger.net/web-security/cross-site-scripting/contexts' }
+        ]
       }
     ]
   },

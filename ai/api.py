@@ -34,6 +34,28 @@ class AIModelAPI:
         prompt = self._build_analysis_prompt(html, test_result)
         return self._call_chat_completions(prompt)
 
+    def explain_workbench(
+        self,
+        page_context: Dict[str, Any],
+        report_context: Dict[str, Any],
+        audience: str = "developer",
+    ) -> Dict[str, Any]:
+        if not self.enabled:
+            raise RuntimeError("AI analysis is disabled")
+        if not self.api_key:
+            raise RuntimeError("AI_API_KEY is not configured")
+
+        prompt = self._build_workbench_explanation_prompt(page_context, report_context, audience)
+        result = self._call_chat(prompt, system_content="你是一位擅长解释 XSS 验证结果的安全讲解员。")
+        return {
+            "success": True,
+            "explanation": {
+                "audience": audience,
+                "content": result,
+                "summary": result[:500] + "..." if len(result) > 500 else result,
+            },
+        }
+
     def _build_analysis_prompt(self, html: str, test_result: Dict[str, Any]) -> str:
         snippet = html[:4000] if html else ""
         return (
@@ -48,11 +70,50 @@ class AIModelAPI:
             f"扫描结果:\n{json.dumps(test_result, ensure_ascii=False, indent=2)}"
         )
 
+    def _build_workbench_explanation_prompt(
+        self,
+        page_context: Dict[str, Any],
+        report_context: Dict[str, Any],
+        audience: str,
+    ) -> str:
+        audience_hint = {
+            "beginner": "请用更通俗、教学化的语言解释，尽量减少术语堆叠。",
+            "developer": "请用开发者能快速理解的语言解释，强调输入、回显、上下文和修复重点。",
+            "thesis": "请用适合论文或答辩展示的语言解释，强调结论、依据和意义。",
+        }.get(audience, "请用清晰、专业但易懂的语言解释。")
+        return (
+            "你正在解释一个 XSS 页面验证工作台中的当前结果。\n\n"
+            f"{audience_hint}\n\n"
+            "输出要求：\n"
+            "1. 先给出一句总判断\n"
+            "2. 再解释为什么会得到这个复测结果\n"
+            "3. 如果有对比报告，说明两次结果最大的变化点\n"
+            "4. 最后给出下一步建议\n"
+            "5. 不要空泛，要结合给定页面、向量、参数、回显和上下文\n\n"
+            f"页面上下文:\n{json.dumps(page_context, ensure_ascii=False, indent=2)}\n\n"
+            f"复测上下文:\n{json.dumps(report_context, ensure_ascii=False, indent=2)}"
+        )
+
     def _call_chat_completions(self, prompt: str) -> Dict[str, Any]:
+        content = self._call_chat(prompt, system_content="你是一位网络安全专家，精通 XSS 漏洞分析。")
+        return {
+            "success": True,
+            "analysis": {
+                "summary": content[:500] + "..." if len(content) > 500 else content,
+                "accuracy": "",
+                "false_positives": [],
+                "false_negatives": [],
+                "suggestions": [],
+                "risk_assessment": "",
+                "full_report": content,
+            },
+        }
+
+    def _call_chat(self, prompt: str, system_content: str) -> str:
         payload = {
             "model": self.model,
             "messages": [
-                {"role": "system", "content": "你是一位网络安全专家，精通 XSS 漏洞分析。"},
+                {"role": "system", "content": system_content},
                 {"role": "user", "content": prompt},
             ],
             "temperature": self.temperature,
@@ -73,20 +134,7 @@ class AIModelAPI:
 
         response.raise_for_status()
         api_response = response.json()
-        content = api_response["choices"][0]["message"]["content"]
-
-        return {
-            "success": True,
-            "analysis": {
-                "summary": content[:500] + "..." if len(content) > 500 else content,
-                "accuracy": "",
-                "false_positives": [],
-                "false_negatives": [],
-                "suggestions": [],
-                "risk_assessment": "",
-                "full_report": content,
-            },
-        }
+        return api_response["choices"][0]["message"]["content"]
 
 
 def get_ai_analyzer(model: Optional[str] = None) -> AIModelAPI:

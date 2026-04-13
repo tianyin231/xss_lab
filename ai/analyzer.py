@@ -27,6 +27,16 @@ class AIAnalyzer:
         test_result = {"status": "pending", "payloads": []}
         return self.analyze_xss_result(html, test_result)
 
+    def explain_workbench(self, page_context: Dict[str, Any], report_context: Dict[str, Any], audience: str = "developer") -> Dict[str, Any]:
+        try:
+            return self.ai_client.explain_workbench(page_context, report_context, audience)
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e),
+                "explanation": None,
+            }
+
 
 def get_analyzer(model: Optional[str] = None) -> AIAnalyzer:
     return AIAnalyzer(model)

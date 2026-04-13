@@ -3,9 +3,12 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from collections import Counter
 from datetime import datetime, timedelta, timezone
+from uuid import uuid4
+from urllib.parse import parse_qsl, urlencode, urlsplit
 
 if __package__ in {None, ""}:
     PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -15,6 +18,7 @@ if __package__ in {None, ""}:
 from ai import get_analyzer
 from app_config import get_bool, get_int
 from flask import Blueprint, Response, jsonify, request
+from lxml import html as lxml_html
 from sqlalchemy import func
 
 from server.db import db
@@ -32,6 +36,22 @@ UTC_TZ = timezone.utc
 @api_bp.get("/")
 def api_root() -> Response:
     return jsonify({"api": "ok"})
+
+
+@api_bp.get("/workbench/url")
+def get_workbench_url() -> Response:
+    job_id = str(request.args.get("job_id") or "").strip()
+    page_url = str(request.args.get("page_url") or "").strip()
+    params: dict[str, str] = {}
+    if job_id:
+        params["job_id"] = job_id
+    if page_url:
+        params["page_url"] = page_url
+    query = urlencode(params)
+    url = "/workbench.html"
+    if query:
+        url = f"{url}?{query}"
+    return jsonify({"ok": True, "url": url})
 
 
 @api_bp.post("/jobs")
@@ -175,6 +195,30 @@ def get_report(job_id: str) -> Response:
     if job is None:
         return jsonify({"error": "not found"}), 404
     return jsonify(_build_report_payload(job))
+
+
+@api_bp.get("/jobs/<job_id>/pages")
+def list_job_pages(job_id: str) -> Response:
+    job: Job | None = db.session.get(Job, job_id)
+    if job is None:
+        return jsonify({"error": "not found"}), 404
+
+    pages = Page.query.filter_by(job_id=job_id).order_by(Page.id.desc()).all()
+    return jsonify(
+        {
+            "ok": True,
+            "pages": [
+                {
+                    "id": item.id,
+                    "url": item.url,
+                    "status_code": item.status_code,
+                    "content_type": item.content_type,
+                    "fetched_at": _to_beijing_iso(item.fetched_at),
+                }
+                for item in pages
+            ],
+        }
+    )
 
 
 @api_bp.get("/jobs/<job_id>/export")
@@ -376,6 +420,7 @@ def retest_job_finding(job_id: str) -> Response:
             message=f"[单点复测] {finding.title} -> {len(records)} 条结果",
         )
     )
+    _persist_runtime_verifications(job_id, records)
     db.session.commit()
 
     return jsonify(
@@ -460,6 +505,8 @@ def retest_job_page(job_id: str) -> Response:
     if page is None:
         return jsonify({"error": "page not found"}), 404
 
+    batch_id = uuid4().hex
+    strategy = _build_page_retest_strategy(page, Finding.query.filter_by(job_id=job_id, url=page.url).all(), _build_page_input_profile(page))
     try:
         records = retest_page(
             job_id=job_id,
@@ -476,10 +523,23 @@ def retest_job_page(job_id: str) -> Response:
         return jsonify({"error": str(exc)}), 500
 
     db.session.add(Log(job_id=job_id, message=f"[页面复测] {page.url} -> {len(records)} 条结果"))
+    _persist_runtime_verifications(
+        job_id,
+        records,
+        batch_id=batch_id,
+        report_meta={
+            "reason": strategy.get("reason"),
+            "preferred_vector": strategy.get("preferred_vector"),
+            "preferred_payload": strategy.get("preferred_payload", {}).get("payload")
+            if isinstance(strategy.get("preferred_payload"), dict)
+            else None,
+        },
+    )
     db.session.commit()
     return jsonify(
         {
             "ok": True,
+            "batch_id": batch_id,
             "page": {
                 "id": page.id,
                 "url": page.url,
@@ -487,6 +547,65 @@ def retest_job_page(job_id: str) -> Response:
             "results": [_serialize_runtime_verification(item) for item in records],
         }
     )
+
+
+@api_bp.delete("/jobs/<job_id>/pages/retest-reports/<batch_id>")
+def delete_page_retest_report(job_id: str, batch_id: str) -> Response:
+    job: Job | None = db.session.get(Job, job_id)
+    if job is None:
+        return jsonify({"error": "not found"}), 404
+
+    page_url = str(request.args.get("url") or "").strip()
+    if not page_url:
+        return jsonify({"error": "url required"}), 400
+
+    records = (
+        DynamicVerification.query.filter_by(job_id=job_id, page_url=page_url)
+        .order_by(DynamicVerification.id.asc())
+        .all()
+    )
+    matched: list[DynamicVerification] = []
+    for item in records:
+        detail = _parse_dynamic_evidence(item.evidence)
+        if detail.get("source") != "manual_retest":
+            continue
+        detail_batch_id = detail.get("batch_id")
+        legacy_batch_id = f"legacy-{item.id}"
+        if batch_id == detail_batch_id or (detail_batch_id is None and batch_id == legacy_batch_id):
+            matched.append(item)
+
+    if not matched:
+        return jsonify({"error": "report not found"}), 404
+
+    for item in matched:
+        db.session.delete(item)
+    db.session.add(Log(job_id=job_id, message=f"[页面复测] 删除复测报告 {batch_id}，共 {len(matched)} 条记录"))
+    db.session.commit()
+    return jsonify({"ok": True, "deleted": len(matched), "batch_id": batch_id})
+
+
+@api_bp.delete("/jobs/<job_id>/pages/retest-results/<int:verification_id>")
+def delete_page_retest_result(job_id: str, verification_id: int) -> Response:
+    job: Job | None = db.session.get(Job, job_id)
+    if job is None:
+        return jsonify({"error": "not found"}), 404
+
+    item: DynamicVerification | None = db.session.get(DynamicVerification, verification_id)
+    if item is None or item.job_id != job_id:
+        return jsonify({"error": "result not found"}), 404
+
+    detail = _parse_dynamic_evidence(item.evidence)
+    if detail.get("source") != "manual_retest":
+        return jsonify({"error": "only manual retest result can be deleted"}), 400
+
+    page_url = str(request.args.get("url") or "").strip()
+    if page_url and item.page_url != page_url:
+        return jsonify({"error": "result not found"}), 404
+
+    db.session.delete(item)
+    db.session.add(Log(job_id=job_id, message=f"[页面复测] 删除复测结果 {verification_id}"))
+    db.session.commit()
+    return jsonify({"ok": True, "deleted": 1, "id": verification_id})
 
 
 @api_bp.post("/jobs/<job_id>/pages/payloads")
@@ -513,6 +632,123 @@ def suggest_job_page_payloads(job_id: str) -> Response:
                 "url": page.url,
             },
             "payloads": suggest_payloads_for_page(page, findings),
+        }
+    )
+
+
+@api_bp.get("/jobs/<job_id>/pages/workbench")
+def get_page_workbench(job_id: str) -> Response:
+    job: Job | None = db.session.get(Job, job_id)
+    if job is None:
+        return jsonify({"error": "not found"}), 404
+
+    page_url = str(request.args.get("url") or "").strip()
+    if not page_url:
+        return jsonify({"error": "url required"}), 400
+
+    page = Page.query.filter_by(job_id=job_id, url=page_url).order_by(Page.id.desc()).first()
+    if page is None:
+        return jsonify({"error": "page not found"}), 404
+
+    findings = Finding.query.filter_by(job_id=job_id, url=page.url).order_by(Finding.id.asc()).all()
+    verifications = (
+        DynamicVerification.query.filter_by(job_id=job_id, page_url=page.url)
+        .order_by(DynamicVerification.id.desc())
+        .all()
+    )
+    manual_retests = [item for item in verifications if _parse_dynamic_evidence(item.evidence).get("source") == "manual_retest"]
+    dynamic_results = [item for item in verifications if _parse_dynamic_evidence(item.evidence).get("source") != "manual_retest"]
+    manual_retest_reports = _build_manual_retest_reports(manual_retests)
+
+    input_profile = _build_page_input_profile(page)
+    return jsonify(
+        {
+            "ok": True,
+            "page": {
+                "id": page.id,
+                "job_id": page.job_id,
+                "url": page.url,
+                "status_code": page.status_code,
+                "content_type": page.content_type,
+                "sha256": page.sha256,
+                "content": page.content,
+                "fetched_at": _to_beijing_iso(page.fetched_at),
+            },
+            "input_profile": input_profile,
+            "risk_summary": _build_page_risk_summary(findings, verifications, input_profile),
+            "repair_suggestions": _build_page_repair_suggestions(findings, input_profile),
+            "related_findings": _serialize_workbench_findings(findings),
+            "manual_retests": [_serialize_verification(item) for item in manual_retests[:20]],
+            "latest_manual_retest_report": manual_retest_reports[0] if manual_retest_reports else None,
+            "manual_retest_reports": manual_retest_reports[:20],
+            "dynamic_results": [_serialize_verification(item) for item in dynamic_results[:20]],
+            "payloads": suggest_payloads_for_page(page, findings),
+            "retest_strategy": _build_page_retest_strategy(page, findings, input_profile),
+        }
+    )
+
+
+@api_bp.post("/jobs/<job_id>/pages/ai-explain")
+def explain_page_workbench(job_id: str) -> Response:
+    job: Job | None = db.session.get(Job, job_id)
+    if job is None:
+        return jsonify({"error": "not found"}), 404
+
+    payload = request.get_json(force=True, silent=True) or {}
+    page_url = str(payload.get("url") or "").strip()
+    audience = str(payload.get("audience") or "developer").strip().lower()
+    batch_id = str(payload.get("batch_id") or "").strip()
+    compare_batch_id = str(payload.get("compare_batch_id") or "").strip()
+    if not page_url:
+        return jsonify({"error": "url required"}), 400
+
+    page = Page.query.filter_by(job_id=job_id, url=page_url).order_by(Page.id.desc()).first()
+    if page is None:
+        return jsonify({"error": "page not found"}), 404
+
+    findings = Finding.query.filter_by(job_id=job_id, url=page.url).order_by(Finding.id.asc()).all()
+    verifications = (
+        DynamicVerification.query.filter_by(job_id=job_id, page_url=page.url)
+        .order_by(DynamicVerification.id.desc())
+        .all()
+    )
+    manual_retests = [item for item in verifications if _parse_dynamic_evidence(item.evidence).get("source") == "manual_retest"]
+    reports = _build_manual_retest_reports(manual_retests)
+    current_report = _select_manual_retest_report(reports, batch_id)
+    compare_report = _select_manual_retest_report(reports, compare_batch_id)
+    input_profile = _build_page_input_profile(page)
+    risk_summary = _build_page_risk_summary(findings, verifications, input_profile)
+
+    page_context = {
+        "url": page.url,
+        "status_code": page.status_code,
+        "content_type": page.content_type,
+        "input_profile": input_profile,
+        "risk_summary": risk_summary,
+        "related_findings": _serialize_workbench_findings(findings)[:8],
+    }
+    report_context = {
+        "current_report": current_report,
+        "compare_report": compare_report,
+    }
+
+    analyzer = get_analyzer()
+    result = analyzer.explain_workbench(page_context, report_context, audience)
+    if not result.get("success"):
+        db.session.add(Log(job_id=job_id, message=f"[AI解释] 页面解释失败：{page.url} - {result.get('error')}"))
+        db.session.commit()
+        return jsonify({"error": str(result.get("error") or "AI explanation failed")}), 500
+
+    db.session.add(Log(job_id=job_id, message=f"[AI解释] 页面解释成功：{page.url}"))
+    db.session.commit()
+    return jsonify(
+        {
+            "ok": True,
+            "audience": audience,
+            "page_url": page.url,
+            "batch_id": current_report["batch_id"] if current_report else None,
+            "compare_batch_id": compare_report["batch_id"] if compare_report else None,
+            "explanation": result["explanation"],
         }
     )
 
@@ -862,12 +1098,19 @@ def _serialize_verification(item: DynamicVerification) -> dict[str, object]:
         "payload": item.payload,
         "status": item.status,
         "engine": detail["engine"],
+        "source": detail["source"],
         "level": explanation["level"],
         "level_label": _dynamic_level_label(explanation["level"]),
         "summary": explanation["summary"],
         "reason": explanation["risk"],
         "recommendation": explanation["recommendation"],
         "evidence": detail["detail"],
+        "reflection_found": detail["reflection_found"],
+        "reflection_context": detail["reflection_context"],
+        "reflection_context_label": _reflection_context_label(detail["reflection_context"]),
+        "reflection_snippet": detail["reflection_snippet"],
+        "context_hint": detail["context_hint"],
+        "batch_id": detail["batch_id"],
         "created_at": _to_beijing_iso(item.created_at),
     }
 
@@ -888,7 +1131,19 @@ def _serialize_ai_report(item: AIReport) -> dict[str, object]:
 
 
 def _serialize_runtime_verification(item) -> dict[str, object]:
-    detail = _parse_dynamic_evidence(json.dumps({"engine": item.engine, "detail": item.evidence}, ensure_ascii=False))
+    detail = _parse_dynamic_evidence(
+        json.dumps(
+            {
+                "engine": item.engine,
+                "detail": item.evidence,
+                "reflection_found": item.reflection_found,
+                "reflection_context": item.reflection_context,
+                "reflection_snippet": item.reflection_snippet,
+                "context_hint": item.context_hint,
+            },
+            ensure_ascii=False,
+        )
+    )
     explanation = _explain_dynamic_verification(
         item.vector,
         item.status,
@@ -904,12 +1159,245 @@ def _serialize_runtime_verification(item) -> dict[str, object]:
         "payload": item.payload,
         "status": item.status,
         "engine": item.engine,
+        "source": "manual_retest",
         "level": explanation["level"],
         "level_label": _dynamic_level_label(explanation["level"]),
         "summary": explanation["summary"],
         "risk": explanation["risk"],
         "recommendation": explanation["recommendation"],
         "evidence": detail["detail"],
+        "reflection_found": detail["reflection_found"],
+        "reflection_context": detail["reflection_context"],
+        "reflection_context_label": _reflection_context_label(detail["reflection_context"]),
+        "reflection_snippet": detail["reflection_snippet"],
+        "context_hint": detail["context_hint"],
+        "batch_id": None,
+    }
+
+
+def _persist_runtime_verifications(
+    job_id: str,
+    records: list[object],
+    *,
+    batch_id: str | None = None,
+    report_meta: dict[str, object] | None = None,
+) -> None:
+    for item in records:
+        db.session.add(
+            DynamicVerification(
+                job_id=job_id,
+                page_id=item.page_id,
+                page_url=item.page_url,
+                target_url=item.target_url,
+                vector=item.vector,
+                parameter_name=item.parameter_name,
+                payload=item.payload,
+                status=item.status,
+                evidence=json.dumps(
+                    {
+                        "engine": item.engine,
+                        "detail": item.evidence,
+                        "reflection_found": bool(getattr(item, "reflection_found", False)),
+                        "reflection_context": getattr(item, "reflection_context", None),
+                        "reflection_snippet": getattr(item, "reflection_snippet", None),
+                        "context_hint": getattr(item, "context_hint", None),
+                        "source": "manual_retest",
+                        "batch_id": batch_id,
+                        "report_reason": (report_meta or {}).get("reason"),
+                        "preferred_vector": (report_meta or {}).get("preferred_vector"),
+                        "preferred_payload": (report_meta or {}).get("preferred_payload"),
+                    },
+                    ensure_ascii=False,
+                ),
+            )
+        )
+
+
+def _build_page_input_profile(page: Page) -> dict[str, object]:
+    split_result = urlsplit(page.url)
+    query_params = sorted({name for name, _ in parse_qsl(split_result.query, keep_blank_values=True)})
+    content = page.content or ""
+    content_lower = content.lower()
+    forms: list[dict[str, object]] = []
+
+    try:
+        if content:
+            document = lxml_html.fromstring(content)
+            for form in document.xpath("//form")[:5]:
+                fields: list[str] = []
+                for field in form.xpath(".//input|.//textarea|.//select"):
+                    field_name = (field.get("name") or "").strip()
+                    field_type = (field.get("type") or "").lower()
+                    if not field_name or field_type in {"submit", "button", "reset", "image", "file"}:
+                        continue
+                    if field_name not in fields:
+                        fields.append(field_name)
+                forms.append(
+                    {
+                        "action": (form.get("action") or page.url).strip() or page.url,
+                        "method": (form.get("method") or "get").strip().lower() or "get",
+                        "fields": fields[:8],
+                    }
+                )
+    except Exception:
+        forms = []
+
+    source_hints: list[str] = []
+    source_tokens = {
+        "location.search": "location.search",
+        "location.hash": "location.hash",
+        "document.url": "document.URL",
+        "location.href": "location.href",
+        "document.cookie": "document.cookie",
+        "localstorage": "localStorage",
+        "sessionstorage": "sessionStorage",
+        "postmessage": "postMessage",
+    }
+    for token, label in source_tokens.items():
+        if token in content_lower:
+            source_hints.append(label)
+
+    inline_event_count = len(re.findall(r"\son[a-z0-9_-]+\s*=", content, flags=re.IGNORECASE))
+    script_blocks = len(re.findall(r"<script\b", content, flags=re.IGNORECASE))
+
+    return {
+        "query_params": query_params,
+        "forms": forms,
+        "uses_hash": "location.hash" in content_lower or "hashchange" in content_lower or "#/" in page.url,
+        "source_hints": source_hints,
+        "inline_event_count": inline_event_count,
+        "script_blocks": script_blocks,
+    }
+
+
+def _build_page_risk_summary(
+    findings: list[Finding],
+    verifications: list[DynamicVerification],
+    input_profile: dict[str, object],
+) -> dict[str, object]:
+    severity_counter = Counter(str(item.severity) for item in findings)
+    kind_counter = Counter(str(item.kind) for item in findings)
+    highest_severity = "low"
+    if severity_counter:
+        highest_severity = max(severity_counter, key=_severity_score)
+
+    risky_api_hints: list[str] = []
+    kinds = set(kind_counter.keys())
+    if {"dom_sink", "source_sink_flow", "ast_data_flow"} & kinds:
+        risky_api_hints.append("危险 DOM 写入 / 数据流")
+    if {"javascript_protocol", "data_protocol", "iframe_srcdoc"} & kinds:
+        risky_api_hints.append("可执行协议 / 文档入口")
+    if {"inline_event_handler", "inline_event_navigation"} & kinds or int(input_profile.get("inline_event_count") or 0) > 0:
+        risky_api_hints.append("内联事件处理逻辑")
+    if "javascript_redirection" in kinds:
+        risky_api_hints.append("客户端跳转逻辑")
+
+    severity_breakdown = [
+        {
+            "key": key,
+            "label": _severity_label(key),
+            "count": count,
+        }
+        for key, count in sorted(severity_counter.items(), key=lambda item: -_severity_score(item[0]))
+    ]
+    kind_breakdown = [
+        {
+            "key": key,
+            "label": _finding_kind_zh(key),
+            "count": count,
+        }
+        for key, count in sorted(kind_counter.items(), key=lambda item: (-item[1], item[0]))
+    ]
+
+    verified_count = sum(1 for item in verifications if item.status == "verified")
+    return {
+        "total_findings": len(findings),
+        "highest_severity": highest_severity,
+        "highest_severity_label": _severity_label(highest_severity),
+        "severity_breakdown": severity_breakdown,
+        "kind_breakdown": kind_breakdown,
+        "has_dynamic_verification": bool(verifications),
+        "dynamic_result_count": len(verifications),
+        "verified_result_count": verified_count,
+        "inline_event_hits": sum(
+            count for kind, count in kind_counter.items() if kind in {"inline_event_handler", "inline_event_navigation"}
+        ),
+        "dom_sink_hits": sum(count for kind, count in kind_counter.items() if kind in {"dom_sink", "source_sink_flow", "ast_data_flow"}),
+        "risky_api_hints": risky_api_hints,
+    }
+
+
+def _build_page_repair_suggestions(findings: list[Finding], input_profile: dict[str, object]) -> list[str]:
+    suggestions: list[str] = []
+    kinds = {item.kind for item in findings}
+    if {"dom_sink", "source_sink_flow", "ast_data_flow"} & kinds:
+        suggestions.append("优先检查 innerHTML、document.write、insertAdjacentHTML 等危险 DOM 写入点，能改成 textContent 或结构化 DOM API 就不要继续拼接 HTML。")
+    if {"inline_event_handler", "inline_event_navigation"} & kinds or int(input_profile.get("inline_event_count") or 0) > 0:
+        suggestions.append("把 onclick、onload 等内联事件迁移为 addEventListener，避免把动态数据直接拼进事件属性。")
+    if {"javascript_protocol", "data_protocol", "iframe_srcdoc"} & kinds:
+        suggestions.append("限制 javascript:、data:text/html、srcdoc 这类可执行入口，改成受控白名单或普通跳转方案。")
+    if input_profile.get("query_params") or input_profile.get("forms"):
+        suggestions.append("对 query 参数和表单回显位置做上下文敏感输出处理，确认文本、属性和脚本上下文分别使用合适的安全写法。")
+    if input_profile.get("uses_hash"):
+        suggestions.append("如果页面读取 location.hash，优先检查前端路由或片段解析逻辑，避免把 hash 内容直接带入 DOM 或脚本执行链。")
+    if not suggestions:
+        suggestions.append("当前页面未命中特别集中的修复方向，建议先结合相关发现和源码确认输入来源、输出位置与页面行为。")
+    return suggestions[:5]
+
+
+def _serialize_workbench_findings(findings: list[Finding]) -> list[dict[str, object]]:
+    deduped: dict[tuple[str, str], Finding] = {}
+    for item in findings:
+        key = (item.kind, item.title)
+        current = deduped.get(key)
+        if current is None or _severity_score(item.severity) > _severity_score(current.severity):
+            deduped[key] = item
+
+    ordered = sorted(
+        deduped.values(),
+        key=lambda item: (-_severity_score(item.severity), item.created_at or datetime.min, item.title),
+    )
+    result: list[dict[str, object]] = []
+    for item in ordered[:20]:
+        payload = _parse_evidence(item.evidence)
+        result.append(
+            {
+                "id": item.id,
+                "url": item.url,
+                "kind": item.kind,
+                "kind_display": _finding_kind_display(item.kind),
+                "severity": item.severity,
+                "severity_label": _severity_label(item.severity),
+                "title": item.title,
+                "evidence": str(payload.get("snippet") or item.evidence)[:220],
+                "created_at": _to_beijing_iso(item.created_at),
+            }
+        )
+    return result
+
+
+def _build_page_retest_strategy(
+    page: Page,
+    findings: list[Finding],
+    input_profile: dict[str, object],
+) -> dict[str, object]:
+    preferred_vector = ""
+    reason = "当前页面没有明显单一向量，默认优先使用系统推荐 payload 和自动向量判断。"
+    if input_profile.get("forms"):
+        preferred_vector = "form"
+        reason = "页面存在表单字段，优先尝试 form 向量通常更容易观察到回显和前端拼接行为。"
+    elif input_profile.get("query_params"):
+        preferred_vector = "query"
+        reason = "页面 URL 已包含查询参数，优先尝试 query 向量可以更直接观察参数处理链。"
+    elif input_profile.get("uses_hash"):
+        preferred_vector = "hash"
+        reason = "页面存在 hash 使用痕迹，更适合先观察前端是否读取 location.hash 并带入 DOM。"
+
+    payloads = suggest_payloads_for_page(page, findings)
+    return {
+        "preferred_vector": preferred_vector,
+        "preferred_payload": payloads[0] if payloads else None,
+        "reason": reason,
     }
 
 
@@ -1155,17 +1643,134 @@ def _severity_score(severity: str) -> int:
 
 def _parse_dynamic_evidence(raw: str | None) -> dict[str, str | None]:
     if not raw:
-        return {"engine": None, "detail": None}
+        return {
+            "engine": None,
+            "detail": None,
+            "source": None,
+            "reflection_found": False,
+            "reflection_context": None,
+            "reflection_snippet": None,
+            "context_hint": None,
+            "batch_id": None,
+            "report_reason": None,
+            "preferred_vector": None,
+            "preferred_payload": None,
+        }
     try:
         payload = json.loads(raw)
         if isinstance(payload, dict):
             return {
                 "engine": payload.get("engine"),
                 "detail": payload.get("detail") or raw,
+                "source": payload.get("source"),
+                "reflection_found": bool(payload.get("reflection_found")),
+                "reflection_context": payload.get("reflection_context"),
+                "reflection_snippet": payload.get("reflection_snippet"),
+                "context_hint": payload.get("context_hint"),
+                "batch_id": payload.get("batch_id"),
+                "report_reason": payload.get("report_reason"),
+                "preferred_vector": payload.get("preferred_vector"),
+                "preferred_payload": payload.get("preferred_payload"),
             }
     except Exception:
         pass
-    return {"engine": None, "detail": raw}
+    return {
+        "engine": None,
+        "detail": raw,
+        "source": None,
+        "reflection_found": False,
+        "reflection_context": None,
+        "reflection_snippet": None,
+        "context_hint": None,
+        "batch_id": None,
+        "report_reason": None,
+        "preferred_vector": None,
+        "preferred_payload": None,
+    }
+
+
+def _build_manual_retest_reports(verifications: list[DynamicVerification]) -> list[dict[str, object]]:
+    grouped: dict[str, dict[str, object]] = {}
+    for item in sorted(verifications, key=lambda current: current.id, reverse=True):
+        detail = _parse_dynamic_evidence(item.evidence)
+        batch_id = str(detail.get("batch_id") or f"legacy-{item.id}")
+        bucket = grouped.setdefault(
+            batch_id,
+            {
+                "batch_id": batch_id,
+                "created_at": _to_beijing_iso(item.created_at),
+                "created_at_ts": _to_beijing_ts(item.created_at) or 0,
+                "reason": detail.get("report_reason"),
+                "preferred_vector": detail.get("preferred_vector"),
+                "preferred_payload": detail.get("preferred_payload"),
+                "results": [],
+            },
+        )
+        bucket["results"].append(_serialize_verification(item))
+
+    reports: list[dict[str, object]] = []
+    for bucket in grouped.values():
+        results = sorted(
+            bucket["results"],
+            key=lambda current: (
+                _dynamic_level_sort_key(str(current.get("level"))),
+                str(current.get("vector") or ""),
+                str(current.get("parameter_name") or ""),
+            ),
+        )
+        statuses = Counter(str(item.get("level") or "") for item in results)
+        reports.append(
+            {
+                "batch_id": bucket["batch_id"],
+                "created_at": bucket["created_at"],
+                "created_at_ts": bucket["created_at_ts"],
+                "reason": bucket["reason"],
+                "preferred_vector": bucket["preferred_vector"],
+                "preferred_payload": bucket["preferred_payload"],
+                "result_count": len(results),
+                "verified_count": sum(1 for item in results if item.get("level") == "confirmed"),
+                "vectors": sorted({str(item.get("vector") or "") for item in results if item.get("vector")}),
+                "status_summary": {
+                    "confirmed": statuses.get("confirmed", 0),
+                    "suspected": statuses.get("suspected", 0),
+                    "not_triggered": statuses.get("not_triggered", 0),
+                    "error": statuses.get("error", 0),
+                },
+                "results": results,
+            }
+        )
+
+    return sorted(reports, key=lambda current: int(current["created_at_ts"]), reverse=True)
+
+
+def _select_manual_retest_report(reports: list[dict[str, object]], batch_id: str | None) -> dict[str, object] | None:
+    if not reports:
+        return None
+    if batch_id:
+        for item in reports:
+            if str(item.get("batch_id")) == batch_id:
+                return item
+    return reports[0]
+
+
+def _dynamic_level_sort_key(level: str) -> int:
+    return {
+        "confirmed": 0,
+        "suspected": 1,
+        "not_triggered": 2,
+        "error": 3,
+    }.get(level, 9)
+
+
+def _reflection_context_label(context: str | None) -> str | None:
+    return {
+        "html_text": "HTML 文本",
+        "html_attr": "HTML 属性",
+        "script": "Script 上下文",
+        "comment": "HTML 注释",
+        "dom_hash": "Hash / DOM 读取",
+        "unknown": "未知上下文",
+    }.get(context or "")
 
 
 def _explain_dynamic_verification(

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import html
 import json
+import re
 import time
 from dataclasses import dataclass
 from typing import Callable
@@ -30,6 +31,10 @@ class VerificationRecord:
     payload: str
     status: str
     evidence: str | None
+    reflection_found: bool = False
+    reflection_context: str | None = None
+    reflection_snippet: str | None = None
+    context_hint: str | None = None
 
 
 def run_dynamic_verification(job_id: str, log: Callable[[str], None] | None = None) -> int:
@@ -89,18 +94,25 @@ def run_dynamic_verification(job_id: str, log: Callable[[str], None] | None = No
 
     for record in records:
         db.session.add(
-            DynamicVerification(
-                job_id=job_id,
-                page_id=record.page_id,
+                DynamicVerification(
+                    job_id=job_id,
+                    page_id=record.page_id,
                 page_url=record.page_url,
                 target_url=record.target_url,
                 vector=record.vector,
-                parameter_name=record.parameter_name,
-                payload=record.payload,
-                status=record.status,
-                evidence=_pack_evidence(record.engine, record.evidence),
+                    parameter_name=record.parameter_name,
+                    payload=record.payload,
+                    status=record.status,
+                    evidence=_pack_evidence(
+                        record.engine,
+                        record.evidence,
+                        reflection_found=record.reflection_found,
+                        reflection_context=record.reflection_context,
+                        reflection_snippet=record.reflection_snippet,
+                        context_hint=record.context_hint,
+                    ),
+                )
             )
-        )
     db.session.commit()
     verified_count = sum(1 for item in records if item.status == "verified")
     _emit(log, f"[动态验证] 完成，共生成 {len(records)} 条结果，已触发 {verified_count} 条")
@@ -388,6 +400,10 @@ def _verify_hash(page: Page, payload: str, selenium_enabled: bool) -> list[Verif
             payload=payload,
             status="suspected",
             evidence=evidence,
+            reflection_found=False,
+            reflection_context="dom_hash",
+            reflection_snippet=None,
+            context_hint="页面存在 location.hash 相关逻辑，更像前端 DOM 读取场景，建议继续结合浏览器行为确认。",
         )
     ]
 
@@ -477,11 +493,17 @@ def _request_and_check(
             response = client.get(target_url, params=data or None)
             text = response.text
             engine = "http"
-        status, evidence = _classify_response(text, payload)
+        status, evidence, reflection_found, reflection_context, reflection_snippet, context_hint = _classify_response(
+            text, payload
+        )
     except Exception as exc:
         engine = "selenium" if driver is not None and method == "get" else "http"
         status = "error"
         evidence = f"{type(exc).__name__}: {exc}"
+        reflection_found = False
+        reflection_context = None
+        reflection_snippet = None
+        context_hint = "本次请求执行失败，因此没有得到有效回显定位结果。"
     return VerificationRecord(
         page_id=page.id,
         page_url=page.url,
@@ -492,20 +514,26 @@ def _request_and_check(
         payload=payload,
         status=status,
         evidence=evidence,
+        reflection_found=reflection_found,
+        reflection_context=reflection_context,
+        reflection_snippet=reflection_snippet,
+        context_hint=context_hint,
     )
 
 
-def _classify_response(text: str, payload: str) -> tuple[str, str | None]:
+def _classify_response(text: str, payload: str) -> tuple[str, str | None, bool, str | None, str | None, str | None]:
     if not text:
-        return "not_triggered", None
+        return "not_triggered", None, False, None, None, "响应内容为空，没有观察到可用于定位的回显信号。"
     candidates = [payload, html.escape(payload), payload.replace('"', "&quot;")]
     for candidate in candidates:
         idx = text.find(candidate)
         if idx != -1:
             start = max(0, idx - 80)
             end = min(len(text), idx + len(candidate) + 80)
-            return "verified", text[start:end].replace("\n", " ")
-    return "not_triggered", None
+            snippet = text[start:end].replace("\n", " ")
+            context = _guess_reflection_context(text, idx, len(candidate))
+            return "verified", snippet, True, context, snippet, _context_hint(context)
+    return "not_triggered", None, False, None, None, "没有在响应内容中直接观察到 payload 回显，可能需要换上下文更匹配的探针继续验证。"
 
 
 def _emit(log: Callable[[str], None] | None, message: str) -> None:
@@ -513,10 +541,39 @@ def _emit(log: Callable[[str], None] | None, message: str) -> None:
         log(message)
 
 
-def _pack_evidence(engine: str, detail: str | None) -> str | None:
-    if detail is None:
+def _pack_evidence(engine: str, detail: str | None, **extra: object) -> str | None:
+    if detail is None and not extra:
         return None
-    return json.dumps({"engine": engine, "detail": detail}, ensure_ascii=False)
+    payload: dict[str, object] = {"engine": engine, "detail": detail}
+    payload.update(extra)
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def _guess_reflection_context(text: str, index: int, length: int) -> str:
+    window_start = max(0, index - 160)
+    window_end = min(len(text), index + length + 160)
+    around = text[window_start:window_end].lower()
+    before = text[window_start:index].lower()
+    if "<script" in around and "</script>" in around:
+        return "script"
+    if "<!--" in around and "-->" in around:
+        return "comment"
+    if re.search(r"<[^>]+=\s*['\"][^'\"]*$", before):
+        return "html_attr"
+    if "<" in before and ">" in around:
+        return "html_text"
+    return "unknown"
+
+
+def _context_hint(context: str | None) -> str:
+    return {
+        "html_text": "payload 看起来出现在 HTML 文本区域，说明输入至少进入了页面结构化内容。",
+        "html_attr": "payload 看起来出现在 HTML 属性值附近，需要重点检查引号逃逸和事件属性风险。",
+        "script": "payload 看起来出现在 script 上下文附近，建议优先检查字符串闭合和脚本拼接逻辑。",
+        "comment": "payload 出现在注释附近，说明存在回显，但当前上下文未必能直接执行。",
+        "dom_hash": "当前结果更像前端读取 hash 后参与 DOM 处理的场景，建议继续结合浏览器行为确认。",
+        "unknown": "payload 已被回显，但暂时无法稳定判断所属上下文，建议继续结合源码和页面行为确认。",
+    }.get(context or "", "当前结果主要用于提示输入已可达，仍需结合上下文继续判断风险强度。")
 
 
 def _init_driver(timeout: float) -> webdriver.Remote:
