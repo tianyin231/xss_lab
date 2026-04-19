@@ -17,6 +17,23 @@ class JobStatus(str, enum.Enum):
     finished = "finished"
 
 
+class User(db.Model):
+    __tablename__ = "users"
+    __table_args__ = (
+        UniqueConstraint("username", name="uq_users_username"),
+        Index("ix_users_username", "username"),
+        Index("ix_users_auth_token", "auth_token"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    username = db.Column(db.String(64), nullable=False)
+    password_hash = db.Column(db.String(255), nullable=False)
+    display_name = db.Column(db.String(128), nullable=True)
+    auth_token = db.Column(db.String(128), nullable=True)
+    auth_token_created_at = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+
 class Job(db.Model):
     __tablename__ = "jobs"
     __table_args__ = (

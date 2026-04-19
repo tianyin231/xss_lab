@@ -56,6 +56,28 @@ class AIModelAPI:
             },
         }
 
+    def recommend_validation_plan(
+        self,
+        page_context: Dict[str, Any],
+        candidates: list[Dict[str, Any]],
+        mode: str = "standard",
+    ) -> Dict[str, Any]:
+        if not self.enabled:
+            raise RuntimeError("AI analysis is disabled")
+        if not self.api_key:
+            raise RuntimeError("AI_API_KEY is not configured")
+
+        prompt = self._build_validation_plan_prompt(page_context, candidates, mode)
+        result = self._call_chat(prompt, system_content="你是一位擅长设计安全验证策略的 XSS 分析助手。")
+        return {
+            "success": True,
+            "plan": {
+                "mode": mode,
+                "content": result,
+                "summary": result[:500] + "..." if len(result) > 500 else result,
+            },
+        }
+
     def _build_analysis_prompt(self, html: str, test_result: Dict[str, Any]) -> str:
         snippet = html[:4000] if html else ""
         return (
@@ -92,6 +114,26 @@ class AIModelAPI:
             "5. 不要空泛，要结合给定页面、向量、参数、回显和上下文\n\n"
             f"页面上下文:\n{json.dumps(page_context, ensure_ascii=False, indent=2)}\n\n"
             f"复测上下文:\n{json.dumps(report_context, ensure_ascii=False, indent=2)}"
+        )
+
+    def _build_validation_plan_prompt(
+        self,
+        page_context: Dict[str, Any],
+        candidates: list[Dict[str, Any]],
+        mode: str,
+    ) -> str:
+        return (
+            "你需要为一个页面验证工作台推荐安全的多轮验证计划。\n\n"
+            "要求：\n"
+            "1. 只能选择非执行型、低风险的验证探针\n"
+            "2. 优先提高判断准确率，而不是追求攻击利用\n"
+            "3. 输出 JSON，格式必须是："
+            '{"reason":"总理由","rounds":[{"candidate_id":"候选ID","reason":"选择理由"}]}\n'
+            "4. quick 模式最多 2 轮，standard 最多 3 轮，deep 最多 5 轮\n"
+            "5. 如果有 form/query/hash 等不同向量，优先给出更值得先测的顺序\n\n"
+            f"模式：{mode}\n\n"
+            f"页面上下文：\n{json.dumps(page_context, ensure_ascii=False, indent=2)}\n\n"
+            f"候选探针：\n{json.dumps(candidates, ensure_ascii=False, indent=2)}"
         )
 
     def _call_chat_completions(self, prompt: str) -> Dict[str, Any]:

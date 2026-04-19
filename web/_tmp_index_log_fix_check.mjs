@@ -1,16 +1,4 @@
-<!doctype html>
-<html lang="zh-CN">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>XSSLab</title>
-    <link rel="stylesheet" href="./style.css" />
-    <script src="./config.js"></script>
-    <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
-  </head>
-  <body>
-    <div id="app"></div>
-    <script type="module">
+
       import { HELP_SECTIONS } from './help-content.js'
       import { AUTH_TEMPLATE } from './auth-view.js'
       import { buildExportUrl } from './export-utils.js'
@@ -1001,6 +989,4 @@
           <div v-else>${AUTH_TEMPLATE}</div>
         `
       }).mount('#app')
-    </script>
-  </body>
-</html>
+    

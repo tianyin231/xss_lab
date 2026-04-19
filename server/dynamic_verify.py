@@ -227,6 +227,158 @@ def retest_page(
     return records
 
 
+def build_safe_probe_candidates_for_page(page: Page, findings: list[Finding], mode: str = "standard") -> list[dict[str, str]]:
+    split_result = urlsplit(page.url)
+    has_query = bool(parse_qsl(split_result.query, keep_blank_values=True))
+    content = page.content or ""
+    lower_content = content.lower()
+    has_form = "<form" in lower_content
+    has_hash = any(token in lower_content for token in ("location.hash", "hashchange", "decodeuricomponent(location.hash)"))
+
+    candidates: list[dict[str, str]] = []
+
+    def add(candidate_id: str, label: str, payload: str, vector: str, context: str, reason: str) -> None:
+        item = {
+            "id": candidate_id,
+            "label": label,
+            "payload": payload,
+            "vector": vector,
+            "context": context,
+            "reason": reason,
+        }
+        if item not in candidates:
+            candidates.append(item)
+
+    if has_query:
+        add("query_text", "Query 文本探针", "xsslab_probe_text_2026", "query", "html_text", "优先确认查询参数是否进入页面文本内容。")
+        add("query_attr", 'Query 属性探针', 'xsslab_probe_attr_2026"', "query", "html_attr", "用于观察属性边界附近是否出现探针。")
+
+    if has_form:
+        add("form_text", "Form 文本探针", "xsslab_probe_form_2026", "form", "html_text", "优先确认表单字段回显。")
+        add("form_attr", 'Form 属性探针', 'xsslab_probe_form_attr_2026"', "form", "html_attr", "用于观察表单输入值是否进入属性位置。")
+
+    if has_hash:
+        add("hash_text", "Hash 文本探针", "xsslab_probe_hash_2026", "hash", "dom_hash", "用于确认 hash 片段是否被页面读取。")
+
+    if any(item.kind in {"dom_sink", "source_sink_flow", "ast_data_flow"} for item in findings):
+        add("query_js", "Query 脚本探针", "'xsslab_probe_js_2026'", "query", "script", "用于观察脚本字符串附近是否出现探针。")
+        if has_form:
+            add("form_js", "Form 脚本探针", "'xsslab_probe_form_js_2026'", "form", "script", "用于观察表单输入是否进入脚本上下文。")
+
+    if not candidates:
+        add("query_fallback", "基础探针", "xsslab_probe_basic_2026", "query", "summary", "没有明显输入面时，保留一个最基础的验证探针。")
+
+    limit = {"quick": 2, "standard": 3, "deep": 5}.get(mode, 3)
+    return candidates[:limit + 2]
+
+
+def run_ai_multi_round_validation(
+    job_id: str,
+    page: Page,
+    rounds: list[dict[str, str]],
+    *,
+    use_selenium: bool | None = None,
+) -> list[dict[str, object]]:
+    outputs: list[dict[str, object]] = []
+    for index, round_item in enumerate(rounds, start=1):
+        records = retest_page(
+            job_id=job_id,
+            page=page,
+            payload=str(round_item.get("payload") or ""),
+            vector=str(round_item.get("vector") or ""),
+            use_selenium=use_selenium,
+        )
+        outputs.append(
+            {
+                "round_index": index,
+                "round_label": str(round_item.get("label") or f"第 {index} 轮"),
+                "candidate_id": str(round_item.get("id") or ""),
+                "reason": str(round_item.get("reason") or ""),
+                "vector": str(round_item.get("vector") or ""),
+                "payload": str(round_item.get("payload") or ""),
+                "context": str(round_item.get("context") or ""),
+                "records": records,
+            }
+        )
+    return outputs
+
+
+def build_safe_probe_candidates_for_page_v2(page: Page, findings: list[Finding], mode: str = "standard") -> list[dict[str, str]]:
+    split_result = urlsplit(page.url)
+    has_query = bool(parse_qsl(split_result.query, keep_blank_values=True))
+    content = page.content or ""
+    lower_content = content.lower()
+    has_form = "<form" in lower_content
+    has_hash = any(token in lower_content for token in ("location.hash", "hashchange", "decodeuricomponent(location.hash)"))
+
+    candidates: list[dict[str, str]] = []
+
+    def add(candidate_id: str, label: str, payload: str, vector: str, context: str, reason: str) -> None:
+        item = {
+            "id": candidate_id,
+            "label": label,
+            "payload": payload,
+            "vector": vector,
+            "context": context,
+            "reason": reason,
+        }
+        if item not in candidates:
+            candidates.append(item)
+
+    if has_query:
+        add("query_text", "Query 文本探针", "xsslab_probe_text_2026", "query", "html_text", "优先确认查询参数是否进入页面文本内容。")
+        add("query_attr", "Query 属性探针", 'xsslab_probe_attr_2026"', "query", "html_attr", "用于观察属性边界附近是否出现探针。")
+
+    if has_form:
+        add("form_text", "Form 文本探针", "xsslab_probe_form_2026", "form", "html_text", "优先确认表单字段是否出现回显。")
+        add("form_attr", "Form 属性探针", 'xsslab_probe_form_attr_2026"', "form", "html_attr", "用于观察表单输入值是否进入属性位置。")
+
+    if has_hash:
+        add("hash_text", "Hash 文本探针", "xsslab_probe_hash_2026", "hash", "dom_hash", "用于确认 hash 片段是否被页面读取。")
+
+    if any(item.kind in {"dom_sink", "source_sink_flow", "ast_data_flow"} for item in findings):
+        add("query_js", "Query 脚本探针", "'xsslab_probe_js_2026'", "query", "script", "用于观察脚本字符串附近是否出现探针。")
+        if has_form:
+            add("form_js", "Form 脚本探针", "'xsslab_probe_form_js_2026'", "form", "script", "用于观察表单输入是否进入脚本上下文。")
+
+    if not candidates:
+        add("query_fallback", "基础探针", "xsslab_probe_basic_2026", "query", "summary", "没有明显输入面时，保留一个最基础的验证探针。")
+
+    limit = {"quick": 2, "standard": 3, "deep": 5}.get(mode, 3)
+    return candidates[: limit + 2]
+
+
+def run_ai_multi_round_validation_v2(
+    job_id: str,
+    page: Page,
+    rounds: list[dict[str, str]],
+    *,
+    use_selenium: bool | None = None,
+) -> list[dict[str, object]]:
+    outputs: list[dict[str, object]] = []
+    for index, round_item in enumerate(rounds, start=1):
+        records = retest_page(
+            job_id=job_id,
+            page=page,
+            payload=str(round_item.get("payload") or ""),
+            vector=str(round_item.get("vector") or ""),
+            use_selenium=use_selenium,
+        )
+        outputs.append(
+            {
+                "round_index": index,
+                "round_label": str(round_item.get("label") or f"第 {index} 轮"),
+                "candidate_id": str(round_item.get("id") or ""),
+                "reason": str(round_item.get("reason") or ""),
+                "vector": str(round_item.get("vector") or ""),
+                "payload": str(round_item.get("payload") or ""),
+                "context": str(round_item.get("context") or ""),
+                "records": records,
+            }
+        )
+    return outputs
+
+
 def suggest_payloads_for_finding(finding: Finding) -> list[dict[str, str]]:
     evidence = _parse_finding_evidence(finding.evidence)
     text = " ".join(

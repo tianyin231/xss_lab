@@ -5,8 +5,8 @@ export const PAGE_WORKBENCH_TEMPLATE = `
         <div class="workbenchEyebrow">Page Verification Workbench</div>
         <h2 class="workbenchTitle">页面验证工作台</h2>
         <p class="workbenchText">
-          这里把页面输入面画像、关联风险、单点复测、动态结果和修复建议收在同一个视角里，
-          方便你围绕单个页面做验证和解释。
+          这里把页面输入面画像、关联风险、手工复测、AI 辅助多轮验证、动态验证结果和修复建议放在同一个视角里，
+          方便你围绕单个页面做验证、比较和解释。
         </p>
       </div>
       <div class="workbenchHeroMeta">
@@ -15,11 +15,11 @@ export const PAGE_WORKBENCH_TEMPLATE = `
           <span class="workbenchMetaValue mono">{{ workbenchData.page.url }}</span>
         </div>
         <div class="workbenchMetaCard">
-          <span class="workbenchMetaLabel">风险数量</span>
+          <span class="workbenchMetaLabel">关联风险数</span>
           <span class="workbenchMetaValue">{{ workbenchData.risk_summary.total_findings }}</span>
         </div>
         <div class="workbenchMetaCard">
-          <span class="workbenchMetaLabel">最高级别</span>
+          <span class="workbenchMetaLabel">最高等级</span>
           <span class="workbenchMetaValue">{{ workbenchData.risk_summary.highest_severity_label }}</span>
         </div>
       </div>
@@ -119,7 +119,7 @@ export const PAGE_WORKBENCH_TEMPLATE = `
             <div class="workbenchTagList" v-if="workbenchData.risk_summary.risky_api_hints.length">
               <span class="workbenchTag workbenchTagStrong" v-for="hint in workbenchData.risk_summary.risky_api_hints" :key="'hint-' + hint">{{ hint }}</span>
             </div>
-            <div class="muted-inline" v-else>当前页面没有特别集中的风险模式。</div>
+            <div class="muted-inline" v-else>当前页面没有特别集中的危险模式。</div>
             <div class="workbenchInlineMeta">
               <span>DOM 汇点：{{ workbenchData.risk_summary.dom_sink_hits }}</span>
               <span>内联事件：{{ workbenchData.risk_summary.inline_event_hits }}</span>
@@ -339,7 +339,7 @@ export const PAGE_WORKBENCH_TEMPLATE = `
       <section class="workbenchPanel">
         <div class="workbenchSectionTitle">AI辅助多轮验证</div>
         <div class="workbenchCallout">
-          <div>这里会使用安全探针而不是可执行 payload，按多轮顺序验证 query / form / hash 等输入面，目标是提高判断准确率。</div>
+          <div>这里使用的是安全探针而不是可执行 payload，会按多轮顺序验证 query / form / hash 等输入面，目标是提高判断准确率。</div>
         </div>
         <div class="workbenchAiToolbar">
           <select class="input workbenchAiSelect" v-model="aiValidateMode">
@@ -408,6 +408,27 @@ export const PAGE_WORKBENCH_TEMPLATE = `
               </article>
             </div>
             <div class="muted-inline" v-else>当前没有可展示的轮次计划。</div>
+          </div>
+          <div class="workbenchCard" v-if="currentAIMultiRoundReport.plan_analysis">
+            <div class="workbenchCardTitle">计划与实际</div>
+            <div class="muted-inline"><strong>贡献最大的一轮：</strong>{{ currentAIMultiRoundReport.plan_analysis.best_round_label || '-' }}</div>
+            <div class="muted-inline"><strong>最有效向量：</strong>{{ currentAIMultiRoundReport.plan_analysis.best_vector || '-' }}</div>
+            <div class="muted-inline" v-if="currentAIMultiRoundReport.plan_analysis.key_parameter"><strong>关键参数：</strong>{{ currentAIMultiRoundReport.plan_analysis.key_parameter }}</div>
+            <div class="muted-inline"><strong>最强信号：</strong>{{ currentAIMultiRoundReport.plan_analysis.strongest_signal_label || '-' }}</div>
+            <div class="muted-inline" v-if="currentAIMultiRoundReport.plan_analysis.strongest_signal_reason">
+              {{ currentAIMultiRoundReport.plan_analysis.strongest_signal_reason }}
+            </div>
+            <div class="workbenchCompareList" v-if="currentAIMultiRoundReport.plan_analysis.expectations && currentAIMultiRoundReport.plan_analysis.expectations.length">
+              <article class="workbenchCompareItem" v-for="item in currentAIMultiRoundReport.plan_analysis.expectations" :key="'ai-expect-' + item.round_index">
+                <div class="workbenchCompareTitle">{{ item.round_label }}</div>
+                <div class="workbenchCompareRow">
+                  <span class="workbenchCompareTag current">{{ item.status_label }}</span>
+                  <span>{{ item.vector || '-' }}</span>
+                  <span>{{ item.confirmed_count }} 已确认 / {{ item.suspected_count }} 可疑</span>
+                </div>
+                <div class="muted-inline">{{ item.reason }}</div>
+              </article>
+            </div>
           </div>
           <div class="workbenchCard">
             <div class="workbenchCardTitle">轮次结果</div>

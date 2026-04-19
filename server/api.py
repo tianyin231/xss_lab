@@ -16,26 +16,135 @@ if __package__ in {None, ""}:
         sys.path.insert(0, PROJECT_ROOT)
 
 from ai import get_analyzer
-from app_config import get_bool, get_int
-from flask import Blueprint, Response, jsonify, request
+from app_config import get, get_bool, get_int
+from flask import Blueprint, Response, g, jsonify, request
 from lxml import html as lxml_html
 from sqlalchemy import func
 
 from server.db import db
-from server.dynamic_verify import retest_finding, retest_page, suggest_payloads_for_finding, suggest_payloads_for_page
-from server.models import AIReport, DynamicVerification, Finding, FindingStatus, Job, Log, Page
+from server.auth import extract_bearer_token, hash_password, issue_token, serialize_user, verify_password
+from server.dynamic_verify import (
+    build_safe_probe_candidates_for_page_v2,
+    retest_finding,
+    retest_page,
+    run_ai_multi_round_validation_v2,
+    suggest_payloads_for_finding,
+    suggest_payloads_for_page,
+)
+from server.models import AIReport, DynamicVerification, Finding, FindingStatus, Job, Log, Page, User
 from server.report_export import build_export_filename, render_report_html, render_report_json
 from server.runner import bus, runner
 
 api_bp = Blueprint("api", __name__)
 BEIJING_TZ = timezone(timedelta(hours=8))
 UTC_TZ = timezone.utc
+PUBLIC_API_PATHS = {
+    "/api",
+    "/api/",
+    "/api/auth/register",
+    "/api/auth/login",
+    "/api/auth/me",
+}
+
+
+@api_bp.before_app_request
+def require_api_auth() -> Response | None:
+    path = request.path or ""
+    if request.method == "OPTIONS":
+        return None
+    if not path.startswith("/api"):
+        return None
+    if path in PUBLIC_API_PATHS:
+        return None
+
+    token = extract_bearer_token(request.headers.get("Authorization")) or str(request.args.get("auth_token") or "").strip()
+    if not token:
+        return jsonify({"error": "auth required"}), 401
+
+    user = User.query.filter_by(auth_token=token).first()
+    if user is None:
+        return jsonify({"error": "invalid token"}), 401
+
+    g.current_user = user
+    return None
 
 
 @api_bp.get("")
 @api_bp.get("/")
 def api_root() -> Response:
     return jsonify({"api": "ok"})
+
+
+@api_bp.post("/auth/register")
+def register() -> Response:
+    payload = request.get_json(force=True, silent=True) or {}
+    username = str(payload.get("username") or "").strip()
+    password = str(payload.get("password") or "")
+    display_name = str(payload.get("display_name") or "").strip() or None
+    invite_code = str(payload.get("invite_code") or "").strip()
+    expected_invite_code = str(get("AUTH_INVITE_CODE", "xsslab-2026")).strip()
+
+    if not username or not password:
+        return jsonify({"error": "username and password required"}), 400
+    if len(username) < 3:
+        return jsonify({"error": "username too short"}), 400
+    if len(password) < 6:
+        return jsonify({"error": "password too short"}), 400
+    if invite_code != expected_invite_code:
+        return jsonify({"error": "invalid invite code"}), 400
+    if User.query.filter_by(username=username).first() is not None:
+        return jsonify({"error": "username already exists"}), 400
+
+    user = User(
+        username=username,
+        password_hash=hash_password(password),
+        display_name=display_name,
+    )
+    token = issue_token(user)
+    user.auth_token_created_at = datetime.utcnow()
+    db.session.add(user)
+    db.session.commit()
+    return jsonify({"ok": True, "user": serialize_user(user), "token": token}), 201
+
+
+@api_bp.post("/auth/login")
+def login() -> Response:
+    payload = request.get_json(force=True, silent=True) or {}
+    username = str(payload.get("username") or "").strip()
+    password = str(payload.get("password") or "")
+    if not username or not password:
+        return jsonify({"error": "username and password required"}), 400
+
+    user = User.query.filter_by(username=username).first()
+    if user is None or not verify_password(user.password_hash, password):
+        return jsonify({"error": "invalid username or password"}), 401
+
+    token = issue_token(user)
+    user.auth_token_created_at = datetime.utcnow()
+    db.session.commit()
+    return jsonify({"ok": True, "user": serialize_user(user), "token": token})
+
+
+@api_bp.get("/auth/me")
+def auth_me() -> Response:
+    token = extract_bearer_token(request.headers.get("Authorization"))
+    if not token:
+        return jsonify({"authenticated": False, "user": None}), 200
+    user = User.query.filter_by(auth_token=token).first()
+    if user is None:
+        return jsonify({"authenticated": False, "user": None}), 200
+    return jsonify({"authenticated": True, "user": serialize_user(user)})
+
+
+@api_bp.post("/auth/logout")
+def logout() -> Response:
+    user: User | None = getattr(g, "current_user", None)
+    if user is None:
+        return jsonify({"ok": True})
+    user.auth_token = None
+    user.auth_token_created_at = None
+    db.session.commit()
+    return jsonify({"ok": True})
 
 
 @api_bp.get("/workbench/url")
@@ -47,6 +156,9 @@ def get_workbench_url() -> Response:
         params["job_id"] = job_id
     if page_url:
         params["page_url"] = page_url
+    current_user: User | None = getattr(g, "current_user", None)
+    if current_user and current_user.auth_token:
+        params["auth_token"] = current_user.auth_token
     query = urlencode(params)
     url = "/workbench.html"
     if query:
@@ -231,7 +343,7 @@ def export_report(job_id: str) -> Response:
     if export_format not in {"html", "json"}:
         return jsonify({"error": "unsupported format"}), 400
 
-    report_payload = _build_report_payload(job)
+    report_payload = _build_report_payload(job, include_export_details=True)
     if export_format == "json":
         body = render_report_json(report_payload)
         mimetype = "application/json; charset=utf-8"
@@ -657,8 +769,14 @@ def get_page_workbench(job_id: str) -> Response:
         .all()
     )
     manual_retests = [item for item in verifications if _parse_dynamic_evidence(item.evidence).get("source") == "manual_retest"]
-    dynamic_results = [item for item in verifications if _parse_dynamic_evidence(item.evidence).get("source") != "manual_retest"]
+    ai_multi_round_retests = [item for item in verifications if _parse_dynamic_evidence(item.evidence).get("source") == "ai_multi_round"]
+    dynamic_results = [
+        item
+        for item in verifications
+        if _parse_dynamic_evidence(item.evidence).get("source") not in {"manual_retest", "ai_multi_round"}
+    ]
     manual_retest_reports = _build_manual_retest_reports(manual_retests)
+    ai_multi_round_reports = _build_runtime_reports_v2(ai_multi_round_retests, source="ai_multi_round")
 
     input_profile = _build_page_input_profile(page)
     return jsonify(
@@ -681,11 +799,146 @@ def get_page_workbench(job_id: str) -> Response:
             "manual_retests": [_serialize_verification(item) for item in manual_retests[:20]],
             "latest_manual_retest_report": manual_retest_reports[0] if manual_retest_reports else None,
             "manual_retest_reports": manual_retest_reports[:20],
+            "latest_ai_multi_round_report": ai_multi_round_reports[0] if ai_multi_round_reports else None,
+            "ai_multi_round_reports": ai_multi_round_reports[:10],
             "dynamic_results": [_serialize_verification(item) for item in dynamic_results[:20]],
             "payloads": suggest_payloads_for_page(page, findings),
             "retest_strategy": _build_page_retest_strategy(page, findings, input_profile),
         }
     )
+
+
+@api_bp.post("/jobs/<job_id>/pages/ai-validate")
+def ai_validate_page_workbench(job_id: str) -> Response:
+    job: Job | None = db.session.get(Job, job_id)
+    if job is None:
+        return jsonify({"error": "not found"}), 404
+
+    payload = request.get_json(force=True, silent=True) or {}
+    page_url = str(payload.get("url") or "").strip()
+    mode = str(payload.get("mode") or "standard").strip().lower()
+    use_selenium_raw = payload.get("use_selenium")
+    use_selenium = use_selenium_raw if isinstance(use_selenium_raw, bool) else None
+    if mode not in {"quick", "standard", "deep"}:
+        return jsonify({"error": "invalid mode"}), 400
+    if not page_url:
+        return jsonify({"error": "url required"}), 400
+
+    page = Page.query.filter_by(job_id=job_id, url=page_url).order_by(Page.id.desc()).first()
+    if page is None:
+        return jsonify({"error": "page not found"}), 404
+
+    findings = Finding.query.filter_by(job_id=job_id, url=page.url).order_by(Finding.id.asc()).all()
+    input_profile = _build_page_input_profile(page)
+    page_context = {
+        "url": page.url,
+        "status_code": page.status_code,
+        "content_type": page.content_type,
+        "input_profile": input_profile,
+        "risk_summary": _build_page_risk_summary(findings, [], input_profile),
+        "related_findings": _serialize_workbench_findings(findings)[:6],
+    }
+    candidates = build_safe_probe_candidates_for_page_v2(page, findings, mode)
+    ai_plan = _recommend_ai_multi_round_plan(page_context, candidates, mode)
+    batch_id = uuid4().hex
+
+    try:
+        round_outputs = run_ai_multi_round_validation_v2(job_id, page, ai_plan["rounds"], use_selenium=use_selenium)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:
+        db.session.add(Log(job_id=job_id, message=f"[AI多轮验证] {page.url} - {exc}"))
+        db.session.commit()
+        return jsonify({"error": str(exc)}), 500
+
+    all_records = []
+    for round_item in round_outputs:
+        all_records.extend(round_item["records"])
+
+    db.session.add(Log(job_id=job_id, message=f"[AI多轮验证] {page.url} -> {len(round_outputs)} 轮 / {len(all_records)} 条结果"))
+    for round_item in round_outputs:
+        _persist_runtime_verifications(
+            job_id,
+            round_item["records"],
+            batch_id=batch_id,
+            source="ai_multi_round",
+            report_meta={
+                "reason": ai_plan["reason"],
+                "preferred_vector": round_item["vector"],
+                "preferred_payload": round_item["payload"],
+                "mode": mode,
+                "round_index": round_item["round_index"],
+                "round_label": round_item["round_label"],
+                "candidate_id": round_item["candidate_id"],
+                "round_reason": round_item["reason"],
+                "plan_provider": ai_plan["provider"],
+            },
+        )
+    db.session.commit()
+
+    reports = _build_runtime_reports_v2(
+        DynamicVerification.query.filter_by(job_id=job_id, page_url=page.url).order_by(DynamicVerification.id.desc()).all(),
+        source="ai_multi_round",
+    )
+    current_report = _select_runtime_report(reports, batch_id)
+    return jsonify(
+        {
+            "ok": True,
+            "batch_id": batch_id,
+            "mode": mode,
+            "plan_provider": ai_plan["provider"],
+            "plan_reason": ai_plan["reason"],
+            "rounds": [
+                {
+                    "round_index": item["round_index"],
+                    "round_label": item["round_label"],
+                    "candidate_id": item["candidate_id"],
+                    "reason": item["reason"],
+                    "vector": item["vector"],
+                    "payload": item["payload"],
+                    "context": item["context"],
+                    "result_count": len(item["records"]),
+                }
+                for item in round_outputs
+            ],
+            "report": current_report,
+        }
+    )
+
+
+@api_bp.delete("/jobs/<job_id>/pages/ai-validate-reports/<batch_id>")
+def delete_ai_validate_report(job_id: str, batch_id: str) -> Response:
+    job: Job | None = db.session.get(Job, job_id)
+    if job is None:
+        return jsonify({"error": "not found"}), 404
+
+    page_url = str(request.args.get("url") or "").strip()
+    if not page_url:
+        return jsonify({"error": "url required"}), 400
+
+    records = (
+        DynamicVerification.query.filter_by(job_id=job_id, page_url=page_url)
+        .order_by(DynamicVerification.id.asc())
+        .all()
+    )
+    matched: list[DynamicVerification] = []
+    for item in records:
+        detail = _parse_dynamic_evidence(item.evidence)
+        if detail.get("source") != "ai_multi_round":
+            continue
+        detail_batch_id = detail.get("batch_id")
+        legacy_batch_id = f"legacy-{item.id}"
+        if batch_id == detail_batch_id or (detail_batch_id is None and batch_id == legacy_batch_id):
+            matched.append(item)
+
+    if not matched:
+        return jsonify({"error": "report not found"}), 404
+
+    for item in matched:
+        db.session.delete(item)
+    db.session.add(Log(job_id=job_id, message=f"[AI多轮验证] 删除验证报告 {batch_id}，共 {len(matched)} 条记录"))
+    db.session.commit()
+    return jsonify({"ok": True, "deleted": len(matched), "batch_id": batch_id})
 
 
 @api_bp.post("/jobs/<job_id>/pages/ai-explain")
@@ -783,12 +1036,13 @@ def get_page_detail(page_id: int) -> Response:
     )
 
 
-def _build_report_payload(job: Job) -> dict[str, object]:
+def _build_report_payload(job: Job, include_export_details: bool = False) -> dict[str, object]:
     job_id = job.id
     pages_count = db.session.query(func.count(Page.id)).filter_by(job_id=job_id).scalar() or 0
     raw_findings = Finding.query.filter_by(job_id=job_id).order_by(Finding.id.asc()).all()
     logs = Log.query.filter_by(job_id=job_id).order_by(Log.id.desc()).limit(500).all()
-    pages = Page.query.filter_by(job_id=job_id).order_by(Page.id.desc()).limit(100).all()
+    pages_query = Page.query.filter_by(job_id=job_id).order_by(Page.id.desc())
+    pages = pages_query.all() if include_export_details else pages_query.limit(100).all()
     verifications = DynamicVerification.query.filter_by(job_id=job_id).order_by(DynamicVerification.id.asc()).all()
     status_records = FindingStatus.query.filter_by(job_id=job_id).all()
     ai_reports = AIReport.query.filter_by(job_id=job_id).order_by(AIReport.id.asc()).all()
@@ -802,7 +1056,8 @@ def _build_report_payload(job: Job) -> dict[str, object]:
     pages.reverse()
     logs.reverse()
 
-    return {
+    payload = {
+        "export_generated_at": _to_beijing_iso(datetime.utcnow()),
         "job": {
             "id": job.id,
             "target_url": job.target_url,
@@ -842,6 +1097,112 @@ def _build_report_payload(job: Job) -> dict[str, object]:
         ],
         "findings": grouped_findings,
         "logs": [{"message": l.message, "ts": _to_beijing_ts(l.created_at)} for l in logs],
+    }
+
+    if include_export_details:
+        export_details = _build_export_detail_payload(pages, raw_findings, verifications)
+        payload["page_workbenches"] = export_details["page_workbenches"]
+        payload["manual_retest_reports"] = export_details["manual_retest_reports"]
+        payload["ai_multi_round_reports"] = export_details["ai_multi_round_reports"]
+        payload["stats"]["manual_retest_reports"] = len(export_details["manual_retest_reports"])
+        payload["stats"]["ai_multi_round_reports"] = len(export_details["ai_multi_round_reports"])
+
+    return payload
+
+
+def _build_export_detail_payload(
+    pages: list[Page],
+    findings: list[Finding],
+    verifications: list[DynamicVerification],
+) -> dict[str, object]:
+    findings_by_url: dict[str, list[Finding]] = {}
+    for item in findings:
+        findings_by_url.setdefault(item.url, []).append(item)
+
+    verifications_by_url: dict[str, list[DynamicVerification]] = {}
+    for item in verifications:
+        verifications_by_url.setdefault(item.page_url, []).append(item)
+
+    page_workbenches: list[dict[str, object]] = []
+    manual_retest_reports: list[dict[str, object]] = []
+    ai_multi_round_reports: list[dict[str, object]] = []
+
+    for page in pages:
+        page_findings = findings_by_url.get(page.url, [])
+        page_verifications = verifications_by_url.get(page.url, [])
+        input_profile = _build_page_input_profile(page)
+        risk_summary = _build_page_risk_summary(page_findings, page_verifications, input_profile)
+        related_findings = _serialize_workbench_findings(page_findings)
+        dynamic_results = [
+            item
+            for item in page_verifications
+            if _parse_dynamic_evidence(item.evidence).get("source") not in {"manual_retest", "ai_multi_round"}
+        ]
+        manual_retests = [
+            item for item in page_verifications if _parse_dynamic_evidence(item.evidence).get("source") == "manual_retest"
+        ]
+        ai_multi_round = [
+            item for item in page_verifications if _parse_dynamic_evidence(item.evidence).get("source") == "ai_multi_round"
+        ]
+        page_manual_reports = [_decorate_runtime_report(item) for item in _build_manual_retest_reports(manual_retests)]
+        page_ai_reports = [
+            _decorate_runtime_report(item) for item in _build_runtime_reports_v2(ai_multi_round, source="ai_multi_round")
+        ]
+        manual_retest_reports.extend(page_manual_reports)
+        ai_multi_round_reports.extend(page_ai_reports)
+
+        page_workbenches.append(
+            {
+                "page": {
+                    "id": page.id,
+                    "job_id": page.job_id,
+                    "url": page.url,
+                    "status_code": page.status_code,
+                    "content_type": page.content_type,
+                    "sha256": page.sha256,
+                    "fetched_at": _to_beijing_iso(page.fetched_at),
+                },
+                "input_profile": input_profile,
+                "risk_summary": risk_summary,
+                "repair_suggestions": _build_page_repair_suggestions(page_findings, input_profile),
+                "related_findings": related_findings,
+                "dynamic_result_count": len(dynamic_results),
+                "dynamic_results": [_serialize_verification(item) for item in dynamic_results[:20]],
+                "retest_strategy": _build_page_retest_strategy(page, page_findings, input_profile),
+                "latest_manual_retest_report": page_manual_reports[0] if page_manual_reports else None,
+                "manual_retest_reports": page_manual_reports[:10],
+                "latest_ai_multi_round_report": page_ai_reports[0] if page_ai_reports else None,
+                "ai_multi_round_reports": page_ai_reports[:10],
+            }
+        )
+
+    manual_retest_reports.sort(key=lambda item: int(item.get("created_at_ts") or 0), reverse=True)
+    ai_multi_round_reports.sort(key=lambda item: int(item.get("created_at_ts") or 0), reverse=True)
+    return {
+        "page_workbenches": page_workbenches,
+        "manual_retest_reports": manual_retest_reports,
+        "ai_multi_round_reports": ai_multi_round_reports,
+    }
+
+
+def _decorate_runtime_report(report: dict[str, object]) -> dict[str, object]:
+    results = report.get("results") or []
+    first = results[0] if results else {}
+    target_urls = sorted({str(item.get("target_url") or "") for item in results if item.get("target_url")})
+    contexts = sorted(
+        {
+            str(item.get("reflection_context_label") or "")
+            for item in results
+            if item.get("reflection_context_label")
+        }
+    )
+    return {
+        **report,
+        "page_id": first.get("page_id"),
+        "page_url": first.get("page_url") or "",
+        "target_urls": target_urls,
+        "reflection_hits": sum(1 for item in results if item.get("reflection_found")),
+        "contexts": contexts,
     }
 
 
@@ -1111,6 +1472,11 @@ def _serialize_verification(item: DynamicVerification) -> dict[str, object]:
         "reflection_snippet": detail["reflection_snippet"],
         "context_hint": detail["context_hint"],
         "batch_id": detail["batch_id"],
+        "mode": detail["mode"],
+        "round_index": detail["round_index"],
+        "round_label": detail["round_label"],
+        "candidate_id": detail["candidate_id"],
+        "round_reason": detail["round_reason"],
         "created_at": _to_beijing_iso(item.created_at),
     }
 
@@ -1180,6 +1546,7 @@ def _persist_runtime_verifications(
     records: list[object],
     *,
     batch_id: str | None = None,
+    source: str = "manual_retest",
     report_meta: dict[str, object] | None = None,
 ) -> None:
     for item in records:
@@ -1201,11 +1568,17 @@ def _persist_runtime_verifications(
                         "reflection_context": getattr(item, "reflection_context", None),
                         "reflection_snippet": getattr(item, "reflection_snippet", None),
                         "context_hint": getattr(item, "context_hint", None),
-                        "source": "manual_retest",
+                        "source": source,
                         "batch_id": batch_id,
                         "report_reason": (report_meta or {}).get("reason"),
                         "preferred_vector": (report_meta or {}).get("preferred_vector"),
                         "preferred_payload": (report_meta or {}).get("preferred_payload"),
+                        "mode": (report_meta or {}).get("mode"),
+                        "round_index": (report_meta or {}).get("round_index"),
+                        "round_label": (report_meta or {}).get("round_label"),
+                        "candidate_id": (report_meta or {}).get("candidate_id"),
+                        "round_reason": (report_meta or {}).get("round_reason"),
+                        "plan_provider": (report_meta or {}).get("plan_provider"),
                     },
                     ensure_ascii=False,
                 ),
@@ -1655,6 +2028,12 @@ def _parse_dynamic_evidence(raw: str | None) -> dict[str, str | None]:
             "report_reason": None,
             "preferred_vector": None,
             "preferred_payload": None,
+            "mode": None,
+            "round_index": None,
+            "round_label": None,
+            "candidate_id": None,
+            "round_reason": None,
+            "plan_provider": None,
         }
     try:
         payload = json.loads(raw)
@@ -1671,6 +2050,12 @@ def _parse_dynamic_evidence(raw: str | None) -> dict[str, str | None]:
                 "report_reason": payload.get("report_reason"),
                 "preferred_vector": payload.get("preferred_vector"),
                 "preferred_payload": payload.get("preferred_payload"),
+                "mode": payload.get("mode"),
+                "round_index": payload.get("round_index"),
+                "round_label": payload.get("round_label"),
+                "candidate_id": payload.get("candidate_id"),
+                "round_reason": payload.get("round_reason"),
+                "plan_provider": payload.get("plan_provider"),
             }
     except Exception:
         pass
@@ -1686,13 +2071,25 @@ def _parse_dynamic_evidence(raw: str | None) -> dict[str, str | None]:
         "report_reason": None,
         "preferred_vector": None,
         "preferred_payload": None,
+        "mode": None,
+        "round_index": None,
+        "round_label": None,
+        "candidate_id": None,
+        "round_reason": None,
+        "plan_provider": None,
     }
 
 
 def _build_manual_retest_reports(verifications: list[DynamicVerification]) -> list[dict[str, object]]:
+    return _build_runtime_reports_v2(verifications, source="manual_retest")
+
+
+def _build_runtime_reports(verifications: list[DynamicVerification], source: str) -> list[dict[str, object]]:
     grouped: dict[str, dict[str, object]] = {}
     for item in sorted(verifications, key=lambda current: current.id, reverse=True):
         detail = _parse_dynamic_evidence(item.evidence)
+        if detail.get("source") != source:
+            continue
         batch_id = str(detail.get("batch_id") or f"legacy-{item.id}")
         bucket = grouped.setdefault(
             batch_id,
@@ -1703,6 +2100,8 @@ def _build_manual_retest_reports(verifications: list[DynamicVerification]) -> li
                 "reason": detail.get("report_reason"),
                 "preferred_vector": detail.get("preferred_vector"),
                 "preferred_payload": detail.get("preferred_payload"),
+                "mode": detail.get("mode"),
+                "plan_provider": detail.get("plan_provider"),
                 "results": [],
             },
         )
@@ -1713,12 +2112,33 @@ def _build_manual_retest_reports(verifications: list[DynamicVerification]) -> li
         results = sorted(
             bucket["results"],
             key=lambda current: (
+                int(current.get("round_index") or 0),
                 _dynamic_level_sort_key(str(current.get("level"))),
                 str(current.get("vector") or ""),
                 str(current.get("parameter_name") or ""),
             ),
         )
         statuses = Counter(str(item.get("level") or "") for item in results)
+        rounds_map: dict[int, dict[str, object]] = {}
+        for item in results:
+            round_index = int(item.get("round_index") or 0)
+            bucket_round = rounds_map.setdefault(
+                round_index,
+                {
+                    "round_index": round_index,
+                    "round_label": item.get("round_label") or (f"第 {round_index} 轮" if round_index else "未命名轮次"),
+                    "vector": item.get("vector"),
+                    "payload": item.get("payload"),
+                    "candidate_id": item.get("candidate_id"),
+                    "round_reason": item.get("round_reason"),
+                    "result_count": 0,
+                    "confirmed_count": 0,
+                },
+            )
+            bucket_round["result_count"] += 1
+            if item.get("level") == "confirmed":
+                bucket_round["confirmed_count"] += 1
+        verdict = _summarize_runtime_report(statuses, results, source)
         reports.append(
             {
                 "batch_id": bucket["batch_id"],
@@ -1727,8 +2147,11 @@ def _build_manual_retest_reports(verifications: list[DynamicVerification]) -> li
                 "reason": bucket["reason"],
                 "preferred_vector": bucket["preferred_vector"],
                 "preferred_payload": bucket["preferred_payload"],
+                "mode": bucket["mode"],
+                "plan_provider": bucket["plan_provider"],
                 "result_count": len(results),
                 "verified_count": sum(1 for item in results if item.get("level") == "confirmed"),
+                "rounds": sorted(rounds_map.values(), key=lambda item: int(item["round_index"])),
                 "vectors": sorted({str(item.get("vector") or "") for item in results if item.get("vector")}),
                 "status_summary": {
                     "confirmed": statuses.get("confirmed", 0),
@@ -1736,6 +2159,9 @@ def _build_manual_retest_reports(verifications: list[DynamicVerification]) -> li
                     "not_triggered": statuses.get("not_triggered", 0),
                     "error": statuses.get("error", 0),
                 },
+                "final_assessment": verdict["value"],
+                "final_assessment_label": verdict["label"],
+                "final_assessment_reason": verdict["reason"],
                 "results": results,
             }
         )
@@ -1743,7 +2169,234 @@ def _build_manual_retest_reports(verifications: list[DynamicVerification]) -> li
     return sorted(reports, key=lambda current: int(current["created_at_ts"]), reverse=True)
 
 
+def _build_runtime_reports_v2(verifications: list[DynamicVerification], source: str) -> list[dict[str, object]]:
+    grouped: dict[str, dict[str, object]] = {}
+    for item in sorted(verifications, key=lambda current: current.id, reverse=True):
+        detail = _parse_dynamic_evidence(item.evidence)
+        if detail.get("source") != source:
+            continue
+        batch_id = str(detail.get("batch_id") or f"legacy-{item.id}")
+        bucket = grouped.setdefault(
+            batch_id,
+            {
+                "batch_id": batch_id,
+                "created_at": _to_beijing_iso(item.created_at),
+                "created_at_ts": _to_beijing_ts(item.created_at) or 0,
+                "reason": detail.get("report_reason"),
+                "preferred_vector": detail.get("preferred_vector"),
+                "preferred_payload": detail.get("preferred_payload"),
+                "mode": detail.get("mode"),
+                "plan_provider": detail.get("plan_provider"),
+                "results": [],
+            },
+        )
+        bucket["results"].append(_serialize_verification(item))
+
+    reports: list[dict[str, object]] = []
+    for bucket in grouped.values():
+        results = sorted(
+            bucket["results"],
+            key=lambda current: (
+                int(current.get("round_index") or 0),
+                _dynamic_level_sort_key(str(current.get("level"))),
+                str(current.get("vector") or ""),
+                str(current.get("parameter_name") or ""),
+            ),
+        )
+        statuses = Counter(str(item.get("level") or "") for item in results)
+        rounds = _build_runtime_rounds(results)
+        verdict = _summarize_runtime_report_v2(statuses, results, source)
+        reports.append(
+            {
+                "batch_id": bucket["batch_id"],
+                "created_at": bucket["created_at"],
+                "created_at_ts": bucket["created_at_ts"],
+                "reason": bucket["reason"],
+                "preferred_vector": bucket["preferred_vector"],
+                "preferred_payload": bucket["preferred_payload"],
+                "mode": bucket["mode"],
+                "plan_provider": bucket["plan_provider"],
+                "result_count": len(results),
+                "verified_count": sum(1 for item in results if item.get("level") == "confirmed"),
+                "rounds": rounds,
+                "vectors": sorted({str(item.get("vector") or "") for item in results if item.get("vector")}),
+                "status_summary": {
+                    "confirmed": statuses.get("confirmed", 0),
+                    "suspected": statuses.get("suspected", 0),
+                    "not_triggered": statuses.get("not_triggered", 0),
+                    "error": statuses.get("error", 0),
+                },
+                "final_assessment": verdict["value"],
+                "final_assessment_label": verdict["label"],
+                "final_assessment_reason": verdict["reason"],
+                "plan_analysis": _build_runtime_plan_analysis(rounds, results, source),
+                "results": results,
+            }
+        )
+
+    return sorted(reports, key=lambda current: int(current["created_at_ts"]), reverse=True)
+
+
+def _build_runtime_rounds(results: list[dict[str, object]]) -> list[dict[str, object]]:
+    rounds_map: dict[int, dict[str, object]] = {}
+    for item in results:
+        round_index = int(item.get("round_index") or 0)
+        bucket = rounds_map.setdefault(
+            round_index,
+            {
+                "round_index": round_index,
+                "round_label": item.get("round_label") or (f"第 {round_index} 轮" if round_index else "未命名轮次"),
+                "vector": item.get("vector"),
+                "payload": item.get("payload"),
+                "candidate_id": item.get("candidate_id"),
+                "round_reason": item.get("round_reason"),
+                "result_count": 0,
+                "confirmed_count": 0,
+                "suspected_count": 0,
+                "not_triggered_count": 0,
+            },
+        )
+        bucket["result_count"] += 1
+        if item.get("level") == "confirmed":
+            bucket["confirmed_count"] += 1
+        elif item.get("level") == "suspected":
+            bucket["suspected_count"] += 1
+        elif item.get("level") == "not_triggered":
+            bucket["not_triggered_count"] += 1
+    return sorted(rounds_map.values(), key=lambda current: int(current["round_index"]))
+
+
+def _build_runtime_plan_analysis(
+    rounds: list[dict[str, object]],
+    results: list[dict[str, object]],
+    source: str,
+) -> dict[str, object] | None:
+    if source != "ai_multi_round" or not rounds:
+        return None
+
+    strongest_result = next((item for item in results if item.get("level") == "confirmed"), None)
+    if strongest_result is None:
+        strongest_result = next((item for item in results if item.get("level") == "suspected"), None)
+    if strongest_result is None and results:
+        strongest_result = results[0]
+
+    best_round = max(
+        rounds,
+        key=lambda item: (
+            int(item.get("confirmed_count") or 0),
+            int(item.get("suspected_count") or 0),
+            -int(item.get("not_triggered_count") or 0),
+            -int(item.get("round_index") or 0),
+        ),
+    )
+
+    expectations: list[dict[str, object]] = []
+    for item in rounds:
+        confirmed_count = int(item.get("confirmed_count") or 0)
+        suspected_count = int(item.get("suspected_count") or 0)
+        not_triggered_count = int(item.get("not_triggered_count") or 0)
+        if confirmed_count > 0:
+            status = "matched"
+            status_label = "达到预期"
+            reason = f"这一轮已经出现 {confirmed_count} 条已确认结果，说明推荐顺序与当前页面输入面基本匹配。"
+        elif suspected_count > 0:
+            status = "partial"
+            status_label = "部分达到预期"
+            reason = f"这一轮虽然没有稳定确认，但已经出现 {suspected_count} 条可疑信号，仍值得继续人工复核。"
+        else:
+            status = "weak"
+            status_label = "低于预期"
+            reason = f"这一轮主要表现为未触发，共 {not_triggered_count} 条结果，说明当前探针与页面上下文匹配度较弱。"
+        expectations.append(
+            {
+                "round_index": item.get("round_index"),
+                "round_label": item.get("round_label"),
+                "vector": item.get("vector"),
+                "status": status,
+                "status_label": status_label,
+                "confirmed_count": confirmed_count,
+                "suspected_count": suspected_count,
+                "not_triggered_count": not_triggered_count,
+                "reason": reason,
+            }
+        )
+
+    strongest_signal_label = "未观察到稳定信号"
+    strongest_signal_reason = "当前多轮验证没有产生稳定的已确认回显，仍需要结合源码与页面行为继续判断。"
+    key_parameter = None
+    if strongest_result is not None:
+        key_parameter = strongest_result.get("parameter_name")
+        if strongest_result.get("level") == "confirmed":
+            strongest_signal_label = "已确认回显"
+            strongest_signal_reason = (
+                f"{strongest_result.get('round_label') or '某一轮'} 在参数 "
+                f"{strongest_result.get('parameter_name') or '-'} 上出现了稳定回显，"
+                f"上下文为 {strongest_result.get('reflection_context_label') or '未知'}。"
+            )
+        elif strongest_result.get("level") == "suspected":
+            strongest_signal_label = "可疑信号"
+            strongest_signal_reason = (
+                f"{strongest_result.get('round_label') or '某一轮'} 在参数 "
+                f"{strongest_result.get('parameter_name') or '-'} 上出现了可疑信号，"
+                "但还没有形成稳定确认结果。"
+            )
+
+    return {
+        "best_round_label": best_round.get("round_label"),
+        "best_vector": best_round.get("vector"),
+        "key_parameter": key_parameter,
+        "strongest_signal_label": strongest_signal_label,
+        "strongest_signal_reason": strongest_signal_reason,
+        "expectations": expectations,
+    }
+
+
+def _summarize_runtime_report_v2(
+    statuses: Counter,
+    results: list[dict[str, object]],
+    source: str,
+) -> dict[str, str]:
+    confirmed = int(statuses.get("confirmed", 0))
+    suspected = int(statuses.get("suspected", 0))
+    not_triggered = int(statuses.get("not_triggered", 0))
+    if confirmed:
+        contexts = sorted({str(item.get("reflection_context_label") or "") for item in results if item.get("reflection_context_label")})
+        context_text = f"，主要出现在 {', '.join(contexts[:3])}" if contexts else ""
+        if source == "ai_multi_round":
+            return {
+                "value": "confirmed",
+                "label": "多轮验证已确认",
+                "reason": f"多轮验证中至少有 {confirmed} 条结果出现稳定回显或明确触发信号{context_text}，说明当前页面存在较强的输入进入输出链路。",
+            }
+        return {
+            "value": "confirmed",
+            "label": "验证已确认",
+            "reason": f"当前报告中至少有 {confirmed} 条结果出现稳定回显或明确触发信号{context_text}。",
+        }
+    if suspected:
+        return {
+            "value": "suspected",
+            "label": "仍需人工复核",
+            "reason": f"当前报告有 {suspected} 条结果出现可疑信号，但还没有稳定的已确认回显，建议继续结合源码和页面行为复核。",
+        }
+    if not_triggered and not confirmed and not suspected:
+        return {
+            "value": "not_triggered",
+            "label": "当前未触发",
+            "reason": f"本次报告共有 {not_triggered} 条结果未触发明显回显，说明当前探针组合暂未观察到稳定信号，但不代表页面一定安全。",
+        }
+    return {
+        "value": "unknown",
+        "label": "结果不足",
+        "reason": "当前报告缺少足够结果，暂时无法形成稳定结论。",
+    }
+
+
 def _select_manual_retest_report(reports: list[dict[str, object]], batch_id: str | None) -> dict[str, object] | None:
+    return _select_runtime_report(reports, batch_id)
+
+
+def _select_runtime_report(reports: list[dict[str, object]], batch_id: str | None) -> dict[str, object] | None:
     if not reports:
         return None
     if batch_id:
@@ -1751,6 +2404,83 @@ def _select_manual_retest_report(reports: list[dict[str, object]], batch_id: str
             if str(item.get("batch_id")) == batch_id:
                 return item
     return reports[0]
+
+
+def _recommend_ai_multi_round_plan(
+    page_context: dict[str, object],
+    candidates: list[dict[str, str]],
+    mode: str,
+) -> dict[str, object]:
+    analyzer = get_analyzer()
+    result = analyzer.recommend_validation_plan(page_context, candidates, mode)
+    if result.get("success"):
+        try:
+            raw = result["plan"]["content"]
+            payload = json.loads(raw)
+            selected: list[dict[str, str]] = []
+            for item in payload.get("rounds") or []:
+                candidate_id = str(item.get("candidate_id") or "").strip()
+                candidate = next((c for c in candidates if c["id"] == candidate_id), None)
+                if not candidate:
+                    continue
+                selected.append({**candidate, "reason": str(item.get("reason") or candidate.get("reason") or "")})
+            if selected:
+                limit = {"quick": 2, "standard": 3, "deep": 5}.get(mode, 3)
+                return {
+                    "provider": "ai",
+                    "reason": str(payload.get("reason") or result["plan"]["summary"]),
+                    "rounds": selected[:limit],
+                }
+        except Exception:
+            pass
+
+    limit = {"quick": 2, "standard": 3, "deep": 5}.get(mode, 3)
+    return {
+        "provider": "fallback",
+        "reason": "根据页面输入面、风险线索和上下文类型，按最可能提高判断准确率的顺序执行安全探针验证。",
+        "rounds": candidates[:limit],
+    }
+
+
+def _summarize_runtime_report(
+    statuses: Counter,
+    results: list[dict[str, object]],
+    source: str,
+) -> dict[str, str]:
+    confirmed = int(statuses.get("confirmed", 0))
+    suspected = int(statuses.get("suspected", 0))
+    not_triggered = int(statuses.get("not_triggered", 0))
+    if confirmed:
+        contexts = sorted({str(item.get("reflection_context_label") or "") for item in results if item.get("reflection_context_label")})
+        context_text = f"，主要出现在 {', '.join(contexts[:3])}" if contexts else ""
+        if source == "ai_multi_round":
+            return {
+                "value": "confirmed",
+                "label": "多轮验证已确认",
+                "reason": f"多轮验证中至少有 {confirmed} 条结果出现稳定回显或明确触发信号{context_text}，说明当前页面存在较强的输入进入输出链路。",
+            }
+        return {
+            "value": "confirmed",
+            "label": "验证已确认",
+            "reason": f"当前报告中至少有 {confirmed} 条结果出现稳定回显或明确触发信号{context_text}。",
+        }
+    if suspected:
+        return {
+            "value": "suspected",
+            "label": "仍需人工复核",
+            "reason": f"当前报告有 {suspected} 条结果出现可疑信号，但还没有稳定的已确认回显，建议继续结合源码和页面行为复核。",
+        }
+    if not_triggered and not confirmed and not suspected:
+        return {
+            "value": "not_triggered",
+            "label": "当前未触发",
+            "reason": f"本次报告共有 {not_triggered} 条结果未触发明显回显，说明当前探针组合暂未观察到稳定信号，但不代表页面一定安全。",
+        }
+    return {
+        "value": "unknown",
+        "label": "结果不足",
+        "reason": "当前报告缺少足够结果，暂时无法形成稳定结论。",
+    }
 
 
 def _dynamic_level_sort_key(level: str) -> int:

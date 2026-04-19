@@ -1,16 +1,4 @@
-<!doctype html>
-<html lang="zh-CN">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>XSSLab</title>
-    <link rel="stylesheet" href="./style.css" />
-    <script src="./config.js"></script>
-    <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
-  </head>
-  <body>
-    <div id="app"></div>
-    <script type="module">
+
       import { HELP_SECTIONS } from './help-content.js'
       import { AUTH_TEMPLATE } from './auth-view.js'
       import { buildExportUrl } from './export-utils.js'
@@ -290,15 +278,6 @@
             return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`
           }
 
-          function mergeLogs(snapshotLogs = [], currentLogs = []) {
-            const merged = new Map()
-            for (const item of [...snapshotLogs, ...currentLogs]) {
-              const key = `${item.ts || ''}::${item.message || ''}`
-              if (!merged.has(key)) merged.set(key, item)
-            }
-            return Array.from(merged.values()).sort((a, b) => Number(a.ts || 0) - Number(b.ts || 0))
-          }
-
           function escapeHtml(value) {
             return String(value)
               .replace(/&/g, '&amp;')
@@ -348,8 +327,7 @@
               if (matchedFinding) selectedFinding.value = matchedFinding
             }
             // 从数据库加载历史日志
-            const snapshotLogs = (data.logs || []).map(l => ({ ts: l.ts, message: l.message }))
-            logs.value = mergeLogs(snapshotLogs, logs.value)
+            logs.value = (data.logs || []).map(l => ({ ts: l.ts, message: l.message }))
             
             // 自动滚动到底部
             nextTick(() => {
@@ -951,7 +929,6 @@
             if (!isAuthenticated.value) return
             if (!jobId) return
             closeModal()
-            logs.value = []
             await fetchJobs()
             await fetchReport(jobId)
             await fetchAIReport(jobId)
@@ -1001,6 +978,4 @@
           <div v-else>${AUTH_TEMPLATE}</div>
         `
       }).mount('#app')
-    </script>
-  </body>
-</html>
+    

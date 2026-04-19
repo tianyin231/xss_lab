@@ -37,6 +37,16 @@ class AIAnalyzer:
                 "explanation": None,
             }
 
+    def recommend_validation_plan(self, page_context: Dict[str, Any], candidates: list[Dict[str, Any]], mode: str = "standard") -> Dict[str, Any]:
+        try:
+            return self.ai_client.recommend_validation_plan(page_context, candidates, mode)
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e),
+                "plan": None,
+            }
+
 
 def get_analyzer(model: Optional[str] = None) -> AIAnalyzer:
     return AIAnalyzer(model)

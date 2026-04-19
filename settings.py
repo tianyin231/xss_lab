@@ -19,6 +19,7 @@ FRONTEND_HOST = "127.0.0.1"
 FRONTEND_PORT = 5173
 FRONTEND_DIR = "web"
 WEB_API_BASE = "http://127.0.0.1:5001/api"
+AUTH_INVITE_CODE = "zxz2026_xss"
 
 DATABASE_URL = "sqlite:///dev.db"
 MYSQL_HOST = "127.0.0.1"
