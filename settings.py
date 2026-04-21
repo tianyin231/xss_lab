@@ -48,10 +48,9 @@ SELENIUM_TIMEOUT = 20
 SELENIUM_WAIT_SECONDS = 2
 
 AI_ENABLED = True
-AI_PROVIDER = "deepseek"
-AI_MODEL = "deepseek-chat"
-AI_API_KEY = "sk-130bf79101914f0cac13672bba65ad0b"
-AI_BASE_URL = "https://api.deepseek.com/v1"
+
+盗apikey的这辈子有了
+
 AI_TIMEOUT = 60.0
 AI_TEMPERATURE = 0.3
 AI_MAX_TOKENS = 2000
