@@ -5,7 +5,7 @@ export const APP_TEMPLATE = `
             <aside class="sidebar" :style="{ width: sidebarWidth + 'px' }">
               <div class="sidebar-content">
                 <div class="brand">
-                  <div class="title">XSSLab</div>
+                  <div class="title">XSS漏洞自动化挖掘工具</div>
                   <div class="sub">任务与报告</div>
                 </div>
 
@@ -223,6 +223,38 @@ export const APP_TEMPLATE = `
                             </tr>
                           </tbody>
                         </table>
+                      </div>
+                    </div>
+
+                    <div v-if="report.dynamic_verification && report.dynamic_verification.successful_payloads && report.dynamic_verification.successful_payloads.length > 0" class="section">
+                      <div class="sectionTitle">成功 Payload</div>
+                      <div class="instance-list">
+                        <div class="instance-item" v-for="(item, idx) in report.dynamic_verification.successful_payloads" :key="'successful-payload-' + idx">
+                          <div class="instance-meta">
+                            <span>{{ item.level_label || item.level }}</span>
+                            <span>{{ item.vector || '-' }}</span>
+                            <span v-if="item.parameter_name">{{ item.parameter_name }}</span>
+                          </div>
+                          <div class="ast-flow-line"><strong>Payload：</strong><span class="mono">{{ item.payload }}</span></div>
+                          <div class="ast-flow-line" v-if="item.target_url"><strong>目标：</strong>{{ item.target_url }}</div>
+                          <div class="ast-flow-line" v-if="item.construction && item.construction.request_construction"><strong>构造方式：</strong>{{ item.construction.request_construction }}</div>
+                          <div class="ast-flow-line" v-if="item.construction && item.construction.before_target"><strong>构造前：</strong>{{ item.construction.before_target }}</div>
+                          <div class="ast-flow-line" v-if="item.construction && item.construction.after_target"><strong>构造后：</strong>{{ item.construction.after_target }}</div>
+                          <div class="ast-flow-line" v-if="item.construction && item.construction.mutated_part"><strong>关键注入点：</strong><span class="mono">{{ item.construction.mutated_part }}</span></div>
+                          <div class="ast-flow-line" v-if="item.construction && item.construction.markup_construction"><strong>标签构造：</strong></div>
+                          <div class="code-block" v-if="item.construction && item.construction.markup_construction">{{ item.construction.markup_construction }}</div>
+                          <div class="ast-flow-line" v-if="item.why_it_worked"><strong>为何成功：</strong>{{ item.why_it_worked }}</div>
+                          <div class="ast-flow-line" v-if="item.reflection_snippet"><strong>命中片段：</strong>{{ item.reflection_snippet }}</div>
+                          <div class="ast-flow-line" v-if="item.construction && item.construction.snippet_before"><strong>命中前对比：</strong></div>
+                          <div class="code-block" v-if="item.construction && item.construction.snippet_before">{{ item.construction.snippet_before }}</div>
+                          <div class="ast-flow-line" v-if="item.construction && item.construction.snippet_after"><strong>命中后对比：</strong></div>
+                          <div class="code-block" v-if="item.construction && item.construction.snippet_after">{{ item.construction.snippet_after }}</div>
+                          <div class="modal-section" style="padding: 12px 0 0;">
+                            <button class="topActionBtn topActionBtnSecondary" @click="copyToClipboard(item.payload, 'Payload 已复制')">复制 Payload</button>
+                            <button class="topActionBtn topActionBtnSecondary" v-if="item.target_url" @click="copyToClipboard(item.target_url, '目标地址已复制')">复制目标 URL</button>
+                            <button class="topActionBtn" v-if="selectedPage && selectedPage.url === item.page_url" @click="applyVerificationPayload(item)">带入单点复测</button>
+                          </div>
+                        </div>
                       </div>
                     </div>
 
@@ -453,13 +485,49 @@ export const APP_TEMPLATE = `
                         <div class="modal-label">验证 Payload</div>
                         <div class="modal-value mono">{{ selectedVerification.payload }}</div>
                       </div>
+                      <div class="modal-section" v-if="selectedVerification.construction && selectedVerification.construction.request_construction">
+                        <div class="modal-label">成功构造</div>
+                        <div class="modal-value">{{ selectedVerification.construction.request_construction }}</div>
+                      </div>
+                      <div class="modal-section" v-if="selectedVerification.construction && selectedVerification.construction.before_target">
+                        <div class="modal-label">构造前地址</div>
+                        <div class="modal-value mono">{{ selectedVerification.construction.before_target }}</div>
+                      </div>
+                      <div class="modal-section" v-if="selectedVerification.construction && selectedVerification.construction.after_target">
+                        <div class="modal-label">构造后地址</div>
+                        <div class="modal-value mono">{{ selectedVerification.construction.after_target }}</div>
+                      </div>
+                      <div class="modal-section" v-if="selectedVerification.construction && selectedVerification.construction.mutated_part">
+                        <div class="modal-label">关键注入点</div>
+                        <div class="modal-value mono">{{ selectedVerification.construction.mutated_part }}</div>
+                      </div>
+                      <div class="modal-section" v-if="selectedVerification.construction && selectedVerification.construction.markup_construction">
+                        <div class="modal-label">标签构造示意</div>
+                        <div class="code-block">{{ selectedVerification.construction.markup_construction }}</div>
+                      </div>
+                      <div class="modal-section" v-if="selectedVerification.construction && selectedVerification.construction.snippet_before">
+                        <div class="modal-label">命中前对比</div>
+                        <div class="code-block">{{ selectedVerification.construction.snippet_before }}</div>
+                      </div>
+                      <div class="modal-section" v-if="selectedVerification.construction && selectedVerification.construction.snippet_after">
+                        <div class="modal-label">命中后对比</div>
+                        <div class="code-block">{{ selectedVerification.construction.snippet_after }}</div>
+                      </div>
+                      <div class="modal-section">
+                        <div class="modal-label">复用操作</div>
+                        <div class="modal-value">
+                          <button class="topActionBtn topActionBtnSecondary" @click="copyToClipboard(selectedVerification.payload, 'Payload 已复制')">复制 Payload</button>
+                          <button class="topActionBtn topActionBtnSecondary" v-if="selectedVerification.target_url" @click="copyToClipboard(selectedVerification.target_url, '目标地址已复制')">复制目标 URL</button>
+                          <button class="topActionBtn" v-if="selectedPage && selectedPage.url === selectedVerification.page_url" @click="applyVerificationPayload(selectedVerification)">带入单点复测</button>
+                        </div>
+                      </div>
                       <div class="modal-section">
                         <div class="modal-label">验证时间</div>
                         <div class="modal-value">{{ formatDateTime(selectedVerification.created_at) }}</div>
                       </div>
                       <div class="modal-section">
                         <div class="modal-label">风险说明</div>
-                        <div class="modal-value">{{ selectedVerification.risk }}</div>
+                        <div class="modal-value">{{ selectedVerification.reason }}</div>
                       </div>
                       <div class="modal-section">
                         <div class="modal-label">修复建议</div>
@@ -719,9 +787,36 @@ export const APP_TEMPLATE = `
                       <div class="modal-label">验证 Payload</div>
                       <div class="modal-value mono">{{ activeModal.data.payload }}</div>
                     </div>
+                    <div class="modal-section" v-if="activeModal.data.construction && activeModal.data.construction.request_construction">
+                      <div class="modal-label">成功构造</div>
+                      <div class="modal-value">{{ activeModal.data.construction.request_construction }}</div>
+                    </div>
+                    <div class="modal-section" v-if="activeModal.data.construction && activeModal.data.construction.before_target">
+                      <div class="modal-label">构造前地址</div>
+                      <div class="modal-value mono">{{ activeModal.data.construction.before_target }}</div>
+                    </div>
+                    <div class="modal-section" v-if="activeModal.data.construction && activeModal.data.construction.after_target">
+                      <div class="modal-label">构造后地址</div>
+                      <div class="modal-value mono">{{ activeModal.data.construction.after_target }}</div>
+                    </div>
+                    <div class="modal-section" v-if="activeModal.data.construction && activeModal.data.construction.mutated_part">
+                      <div class="modal-label">关键注入点</div>
+                      <div class="modal-value mono">{{ activeModal.data.construction.mutated_part }}</div>
+                    </div>
+                    <div class="modal-section" v-if="activeModal.data.construction && activeModal.data.construction.markup_construction">
+                      <div class="modal-label">标签构造示意</div>
+                      <div class="code-block">{{ activeModal.data.construction.markup_construction }}</div>
+                    </div>
+                    <div class="modal-section">
+                      <div class="modal-label">复用操作</div>
+                      <div class="modal-value">
+                        <button class="topActionBtn topActionBtnSecondary" @click="copyToClipboard(activeModal.data.payload, 'Payload 已复制')">复制 Payload</button>
+                        <button class="topActionBtn topActionBtnSecondary" v-if="activeModal.data.target_url" @click="copyToClipboard(activeModal.data.target_url, '目标地址已复制')">复制目标 URL</button>
+                      </div>
+                    </div>
                     <div class="modal-section">
                       <div class="modal-label">风险说明</div>
-                      <div class="modal-value">{{ activeModal.data.risk }}</div>
+                      <div class="modal-value">{{ activeModal.data.reason }}</div>
                     </div>
                     <div class="modal-section">
                       <div class="modal-label">修复建议</div>

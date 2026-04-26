@@ -1,5 +1,5 @@
 """
-XSSLab 一键启动脚本
+XSS漏洞自动化挖掘工具 一键启动脚本
 作用：同时启动前端静态服务器 (web/) 和后端 Flask 服务器 (server/)，并管理它们的生命周期。
 """
 from __future__ import annotations

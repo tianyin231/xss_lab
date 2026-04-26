@@ -136,6 +136,27 @@ export const PAGE_WORKBENCH_TEMPLATE = `
           <div v-if="workbenchData.retest_strategy.preferred_vector"><strong>推荐向量：</strong>{{ workbenchData.retest_strategy.preferred_vector }}</div>
           <div v-if="workbenchData.retest_strategy.preferred_payload" class="mono"><strong>默认探针：</strong>{{ workbenchData.retest_strategy.preferred_payload.payload }}</div>
         </div>
+        <div class="workbenchCluster" v-if="workbenchData.successful_payloads && workbenchData.successful_payloads.length">
+          <div class="workbenchCard" v-for="(item, idx) in workbenchData.successful_payloads" :key="'successful-payload-' + idx">
+            <div class="workbenchCardTitle">成功 Payload {{ idx + 1 }}</div>
+            <div class="muted-inline">{{ item.level_label || item.level }} / {{ item.vector || '-' }} / {{ item.parameter_name || '-' }}</div>
+            <div class="workbenchResultTitle mono">{{ item.payload }}</div>
+            <div class="muted-inline" v-if="item.why_it_worked">{{ item.why_it_worked }}</div>
+            <div class="muted-inline" v-if="item.construction && item.construction.request_construction">{{ item.construction.request_construction }}</div>
+            <div class="muted-inline mono" v-if="item.construction && item.construction.after_target">{{ item.construction.after_target }}</div>
+            <div class="muted-inline mono" v-if="item.construction && item.construction.mutated_part">{{ item.construction.mutated_part }}</div>
+            <div class="muted-inline" v-if="item.reflection_snippet">命中片段：{{ item.reflection_snippet }}</div>
+            <div class="muted-inline" v-if="item.target_url">目标：{{ item.target_url }}</div>
+            <div class="code-block" v-if="item.construction && item.construction.markup_construction">{{ item.construction.markup_construction }}</div>
+            <div class="code-block" v-if="item.construction && item.construction.snippet_before">{{ item.construction.snippet_before }}</div>
+            <div class="code-block" v-if="item.construction && item.construction.snippet_after">{{ item.construction.snippet_after }}</div>
+            <div class="actions" style="margin-top: 12px;">
+              <button class="topActionBtn" @click="applySuccessfulPayload(item)">带入复测</button>
+              <button class="topActionBtn topActionBtnSecondary" @click="copyToClipboard(item.payload, 'Payload 已复制')">复制 Payload</button>
+              <button class="topActionBtn topActionBtnSecondary" v-if="item.target_url" @click="copyToClipboard(item.target_url, '目标地址已复制')">复制目标 URL</button>
+            </div>
+          </div>
+        </div>
         <div class="retest-card workbenchRetestCard">
           <div class="retest-toolbar">
             <button class="topActionBtn retest-btn" :disabled="workbenchRetesting" @click="runWorkbenchRetest()">

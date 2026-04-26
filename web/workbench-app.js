@@ -250,6 +250,37 @@ createApp({
       }
     }
 
+    async function copyToClipboard(text, successMessage = '已复制') {
+      const value = String(text || '').trim()
+      if (!value) return
+      try {
+        if (navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(value)
+        } else {
+          const textarea = document.createElement('textarea')
+          textarea.value = value
+          textarea.setAttribute('readonly', 'readonly')
+          textarea.style.position = 'fixed'
+          textarea.style.left = '-9999px'
+          document.body.appendChild(textarea)
+          textarea.select()
+          document.execCommand('copy')
+          textarea.remove()
+        }
+        window.alert(successMessage)
+      } catch (err) {
+        window.alert(`复制失败: ${err.message}`)
+      }
+    }
+
+    function applySuccessfulPayload(item) {
+      if (!item?.payload) return
+      workbenchSelectedPreset.value = '__custom__'
+      workbenchCustomPayload.value = item.payload
+      workbenchSelectedVector.value = item.vector || ''
+      workbenchRetestFeedback.value = '已带入动态验证成功的 payload，可直接开始复测。'
+    }
+
     async function runWorkbenchRetest() {
       if (!selectedJobId.value || !workbenchData.value?.page?.url) return
       let payload = ''
@@ -496,6 +527,8 @@ createApp({
       workbenchCustomPayload,
       workbenchRetestPayloadOptions,
       formatDateTime,
+      copyToClipboard,
+      applySuccessfulPayload,
       applyWorkbenchRetestPreset,
       runWorkbenchRetest,
       refreshWorkbench,

@@ -197,7 +197,7 @@ def render_report_html(report_data: dict[str, object]) -> str:
   <body>
     <div class="wrap">
       <section class="hero">
-        <div class="eyebrow">XSSLab Export</div>
+        <div class="eyebrow">XSS漏洞自动化挖掘工具 Export</div>
         <h1>XSS 扫描导出报告</h1>
         <div class="meta-list">
           <div class="meta">目标地址：{_escape(job.get("target_url") or "-")}</div>

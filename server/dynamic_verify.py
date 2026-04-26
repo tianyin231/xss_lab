@@ -12,6 +12,7 @@ from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 import httpx
 from lxml import html as lxml_html
 from selenium import webdriver
+from selenium.common.exceptions import NoAlertPresentException, WebDriverException
 from selenium.webdriver.chrome.options import Options as ChromeOptions
 from selenium.webdriver.firefox.options import Options as FirefoxOptions
 
@@ -37,6 +38,84 @@ class VerificationRecord:
     context_hint: str | None = None
 
 
+def _safe_probe_preset(name: str) -> dict[str, str]:
+    presets = get("DYNAMIC_VERIFY_SAFE_PROBE_PRESETS", {}) or {}
+    item = presets.get(name) or {}
+    return {
+        "label": str(item.get("label") or name),
+        "payload": str(item.get("payload") or ""),
+        "vector": str(item.get("vector") or ""),
+        "context": str(item.get("context") or ""),
+        "reason": str(item.get("reason") or ""),
+    }
+
+
+def _suggested_payload_preset(name: str) -> dict[str, str]:
+    presets = get("DYNAMIC_VERIFY_SUGGESTED_PAYLOAD_PRESETS", {}) or {}
+    item = presets.get(name) or {}
+    return {
+        "label": str(item.get("label") or name),
+        "payload": str(item.get("payload") or ""),
+        "vector": str(item.get("vector") or ""),
+    }
+
+
+def _resolve_payload_alias(payload: str) -> str:
+    safe_probe_aliases = {
+        "xsslab_probe_text_2026": "query_text",
+        'xsslab_probe_attr_2026"': "query_attr",
+        "xsslab_probe_form_2026": "form_text",
+        'xsslab_probe_form_attr_2026"': "form_attr",
+        "xsslab_probe_hash_2026": "hash_text",
+        "'xsslab_probe_js_2026'": "query_js",
+        "'xsslab_probe_form_js_2026'": "form_js",
+        "xsslab_probe_basic_2026": "query_fallback",
+    }
+    suggested_aliases = {
+        "<img src=x onerror=alert(1)>": "html_tag",
+        "<svg onload=alert(1)>": "svg_event",
+        '" autofocus onfocus=alert(1) x="': "attr_breakout_double",
+        "' onmouseover='alert(1)' x='": "attr_breakout_single",
+        '" onmouseover="alert(1)': "query_attr_breakout",
+        '";alert(1);//': "js_string_double",
+        "';alert(1);//": "js_string_single",
+        "javascript:alert(1)": "javascript_protocol",
+        "xsslab_probe_2026": "basic_probe",
+    }
+    if payload in safe_probe_aliases:
+        return _safe_probe_preset(safe_probe_aliases[payload])["payload"] or payload
+    if payload in suggested_aliases:
+        return _suggested_payload_preset(suggested_aliases[payload])["payload"] or payload
+    return payload
+
+
+def _default_dynamic_payload() -> str:
+    return str(get("DYNAMIC_VERIFY_PAYLOAD", "Zxz_xss_payload"))
+
+
+def _pick_preferred_payload(
+    suggestions: list[dict[str, str]],
+    preferred_vector: str = "",
+    fallback: str | None = None,
+) -> str:
+    normalized_vector = str(preferred_vector or "").strip().lower()
+    resolved_fallback = str(fallback or _default_dynamic_payload())
+
+    if normalized_vector:
+        for item in suggestions:
+            if str(item.get("vector") or "").strip().lower() == normalized_vector:
+                payload = str(item.get("payload") or "").strip()
+                if payload:
+                    return payload
+
+    for item in suggestions:
+        payload = str(item.get("payload") or "").strip()
+        if payload:
+            return payload
+
+    return resolved_fallback
+
+
 def run_dynamic_verification(job_id: str, log: Callable[[str], None] | None = None) -> int:
     if not get_bool("DYNAMIC_VERIFY_ENABLED", False):
         return 0
@@ -58,7 +137,6 @@ def run_dynamic_verification(job_id: str, log: Callable[[str], None] | None = No
     for finding in findings:
         findings_by_url.setdefault(finding.url, []).append(finding)
 
-    payload = str(get("DYNAMIC_VERIFY_PAYLOAD", "xsslab_verify_payload_2026"))
     timeout = get_float("DYNAMIC_VERIFY_TIMEOUT", 15.0)
     wait_seconds = get_float("DYNAMIC_VERIFY_WAIT_SECONDS", 2.0)
     trust_env = get_bool("DYNAMIC_VERIFY_TRUST_ENV", False)
@@ -77,14 +155,40 @@ def run_dynamic_verification(job_id: str, log: Callable[[str], None] | None = No
             for page in pages:
                 if not page.url.lower().startswith(("http://", "https://")):
                     continue
-                vectors = _plan_verification_vectors(page, findings_by_url.get(page.url, []))
+                page_findings = findings_by_url.get(page.url, [])
+                vectors = _plan_verification_vectors(page, page_findings)
+                suggested_payloads = suggest_payloads_for_page(page, page_findings)
                 _emit(log, f"[动态验证] 页面 {page.url} 计划验证向量: {', '.join(vectors) if vectors else 'none'}")
                 if "query" in vectors:
-                    records.extend(_verify_query(client, driver, page, payload, wait_seconds))
+                    records.extend(
+                        _verify_query(
+                            client,
+                            driver,
+                            page,
+                            _pick_preferred_payload(suggested_payloads, "query"),
+                            wait_seconds,
+                        )
+                    )
                 if "form" in vectors:
-                    records.extend(_verify_forms(client, driver, page, payload, wait_seconds))
+                    records.extend(
+                        _verify_forms(
+                            client,
+                            driver,
+                            page,
+                            _pick_preferred_payload(suggested_payloads, "form"),
+                            wait_seconds,
+                        )
+                    )
                 if "hash" in vectors:
-                    records.extend(_verify_hash(page, payload, driver is not None))
+                    records.extend(
+                        _verify_hash_runtime(
+                            client,
+                            driver,
+                            page,
+                            _pick_preferred_payload(suggested_payloads, "hash"),
+                            wait_seconds,
+                        )
+                    )
     finally:
         if driver is not None:
             try:
@@ -130,7 +234,6 @@ def retest_finding(
     if page is None:
         raise ValueError("page not found for finding")
 
-    payload_text = str(payload or get("DYNAMIC_VERIFY_PAYLOAD", "xsslab_verify_payload_2026"))
     timeout = get_float("DYNAMIC_VERIFY_TIMEOUT", 15.0)
     wait_seconds = get_float("DYNAMIC_VERIFY_WAIT_SECONDS", 2.0)
     trust_env = get_bool("DYNAMIC_VERIFY_TRUST_ENV", False)
@@ -154,17 +257,19 @@ def retest_finding(
     if not planned_vectors:
         raise ValueError("no verification vector available for this finding")
 
+    suggested_payloads = suggest_payloads_for_finding(finding)
     records: list[VerificationRecord] = []
     driver = _init_driver(timeout) if selenium_enabled else None
     try:
         with httpx.Client(timeout=timeout, follow_redirects=True, trust_env=trust_env, verify=ssl_verify) as client:
             for current_vector in planned_vectors:
+                payload_text = str(payload or _pick_preferred_payload(suggested_payloads, current_vector))
                 if current_vector == "query":
                     records.extend(_verify_query(client, driver, page, payload_text, wait_seconds))
                 elif current_vector == "form":
                     records.extend(_verify_forms(client, driver, page, payload_text, wait_seconds))
                 elif current_vector == "hash":
-                    records.extend(_verify_hash(page, payload_text, driver is not None))
+                    records.extend(_verify_hash_runtime(client, driver, page, payload_text, wait_seconds))
     finally:
         if driver is not None:
             try:
@@ -182,7 +287,6 @@ def retest_page(
     vector: str | None = None,
     use_selenium: bool | None = None,
 ) -> list[VerificationRecord]:
-    payload_text = str(payload or get("DYNAMIC_VERIFY_PAYLOAD", "xsslab_verify_payload_2026"))
     timeout = get_float("DYNAMIC_VERIFY_TIMEOUT", 15.0)
     wait_seconds = get_float("DYNAMIC_VERIFY_WAIT_SECONDS", 2.0)
     trust_env = get_bool("DYNAMIC_VERIFY_TRUST_ENV", False)
@@ -206,17 +310,19 @@ def retest_page(
     if not planned_vectors:
         raise ValueError("no verification vector available for this page")
 
+    suggested_payloads = suggest_payloads_for_page(page, findings)
     records: list[VerificationRecord] = []
     driver = _init_driver(timeout) if selenium_enabled else None
     try:
         with httpx.Client(timeout=timeout, follow_redirects=True, trust_env=trust_env, verify=ssl_verify) as client:
             for current_vector in planned_vectors:
+                payload_text = str(payload or _pick_preferred_payload(suggested_payloads, current_vector))
                 if current_vector == "query":
                     records.extend(_verify_query(client, driver, page, payload_text, wait_seconds))
                 elif current_vector == "form":
                     records.extend(_verify_forms(client, driver, page, payload_text, wait_seconds))
                 elif current_vector == "hash":
-                    records.extend(_verify_hash(page, payload_text, driver is not None))
+                    records.extend(_verify_hash_runtime(client, driver, page, payload_text, wait_seconds))
     finally:
         if driver is not None:
             try:
@@ -241,7 +347,7 @@ def build_safe_probe_candidates_for_page(page: Page, findings: list[Finding], mo
         item = {
             "id": candidate_id,
             "label": label,
-            "payload": payload,
+            "payload": _resolve_payload_alias(payload),
             "vector": vector,
             "context": context,
             "reason": reason,
@@ -317,7 +423,7 @@ def build_safe_probe_candidates_for_page_v2(page: Page, findings: list[Finding],
         item = {
             "id": candidate_id,
             "label": label,
-            "payload": payload,
+            "payload": _resolve_payload_alias(payload),
             "vector": vector,
             "context": context,
             "reason": reason,
@@ -397,7 +503,7 @@ def suggest_payloads_for_finding(finding: Finding) -> list[dict[str, str]]:
     def add(label: str, payload: str, vector: str = "") -> None:
         item = {
             "label": label,
-            "payload": payload,
+            "payload": _resolve_payload_alias(payload),
             "vector": vector,
         }
         if item not in suggestions:
@@ -440,7 +546,7 @@ def suggest_payloads_for_page(page: Page, findings: list[Finding]) -> list[dict[
     def add(label: str, payload: str, vector: str = "") -> None:
         item = {
             "label": label,
-            "payload": payload,
+            "payload": _resolve_payload_alias(payload),
             "vector": vector,
         }
         if item not in suggestions:
@@ -560,6 +666,37 @@ def _verify_hash(page: Page, payload: str, selenium_enabled: bool) -> list[Verif
     ]
 
 
+def _verify_hash_runtime(
+    client: httpx.Client,
+    driver: webdriver.Remote | None,
+    page: Page,
+    payload: str,
+    wait_seconds: float,
+) -> list[VerificationRecord]:
+    content = page.content or ""
+    hash_signals = ("location.hash", "hashchange", "decodeURIComponent(location.hash)")
+    if not any(signal in content for signal in hash_signals):
+        return []
+
+    target_url = page.url.split("#", 1)[0] + "#" + payload
+    if driver is not None:
+        return [
+            _request_and_check(
+                client,
+                driver,
+                page,
+                target_url,
+                "hash",
+                "location.hash",
+                payload,
+                method="get",
+                wait_seconds=wait_seconds,
+            )
+        ]
+
+    return _verify_hash(page, payload, False)
+
+
 def _plan_verification_vectors(page: Page, findings: list[Finding]) -> list[str]:
     hints: set[str] = set()
     content = page.content or ""
@@ -619,6 +756,144 @@ def _parse_finding_evidence(raw: str) -> dict[str, object]:
     return {"snippet": raw}
 
 
+def _wait_for_browser_idle(driver: webdriver.Remote, wait_seconds: float) -> None:
+    deadline = time.time() + max(wait_seconds, 0.5)
+    last_html = ""
+    stable_rounds = 0
+    while time.time() < deadline:
+        try:
+            ready = str(driver.execute_script("return document.readyState || ''")).lower()
+            current_html = str(
+                driver.execute_script("return document.documentElement ? document.documentElement.outerHTML : ''")
+                or ""
+            )
+        except Exception:
+            time.sleep(0.1)
+            continue
+        if ready == "complete" and current_html == last_html:
+            stable_rounds += 1
+            if stable_rounds >= 2:
+                return
+        else:
+            stable_rounds = 0
+        last_html = current_html
+        time.sleep(0.15)
+    if wait_seconds > 0:
+        time.sleep(min(wait_seconds, 1.0))
+
+
+def _collect_browser_result(
+    driver: webdriver.Remote,
+    wait_seconds: float,
+) -> tuple[str, str | None, str | None]:
+    _wait_for_browser_idle(driver, wait_seconds)
+    alert_text = None
+    try:
+        alert = driver.switch_to.alert
+        alert_text = str(alert.text or "").strip() or None
+        alert.accept()
+    except NoAlertPresentException:
+        pass
+    except WebDriverException:
+        pass
+
+    dom_text = ""
+    current_url = None
+    try:
+        dom_text = str(
+            driver.execute_script("return document.documentElement ? document.documentElement.outerHTML : '';")
+            or ""
+        )
+    except Exception:
+        try:
+            dom_text = str(driver.page_source or "")
+        except Exception:
+            dom_text = ""
+    try:
+        current_url = str(driver.current_url or "")
+    except Exception:
+        current_url = None
+    return dom_text, alert_text, current_url
+
+
+def _submit_with_driver(
+    driver: webdriver.Remote,
+    page_url: str,
+    target_url: str,
+    method: str,
+    data: dict[str, str] | None,
+    wait_seconds: float,
+) -> tuple[str, str | None, str | None]:
+    if method.lower() == "get":
+        driver.get(target_url)
+        return _collect_browser_result(driver, wait_seconds)
+
+    driver.get(page_url)
+    _wait_for_browser_idle(driver, min(wait_seconds, 1.0))
+    payload_data = dict(data or {})
+    driver.execute_script(
+        """
+        const targetUrl = arguments[0];
+        const method = arguments[1];
+        const fields = arguments[2];
+        const form = document.createElement('form');
+        form.method = method;
+        form.action = targetUrl;
+        form.style.display = 'none';
+        for (const [name, value] of Object.entries(fields)) {
+          const input = document.createElement('input');
+          input.type = 'hidden';
+          input.name = name;
+          input.value = value;
+          form.appendChild(input);
+        }
+        document.body.appendChild(form);
+        form.submit();
+        """,
+        target_url,
+        method.lower(),
+        payload_data,
+    )
+    return _collect_browser_result(driver, wait_seconds)
+
+
+def _classify_runtime_result(
+    text: str,
+    payload: str,
+    *,
+    alert_text: str | None = None,
+    browser_url: str | None = None,
+) -> tuple[str, str | None, bool, str | None, str | None, str | None]:
+    if not text:
+        if alert_text:
+            evidence = f"浏览器出现弹窗：{alert_text}"
+            if browser_url:
+                evidence = f"{evidence} @ {browser_url}"
+            return "verified", evidence, True, "script", evidence, "浏览器侧已经出现可见脚本执行信号，说明当前 payload 很可能已进入可执行上下文。"
+        return "not_triggered", None, False, None, None, "响应内容为空，没有观察到可用于定位的回显信号。"
+
+    candidates = [payload, html.escape(payload), payload.replace('"', "&quot;")]
+    for candidate in candidates:
+        idx = text.find(candidate)
+        if idx != -1:
+            start = max(0, idx - 80)
+            end = min(len(text), idx + len(candidate) + 80)
+            snippet = text[start:end].replace("\n", " ")
+            context = _guess_reflection_context(text, idx, len(candidate))
+            hint = _context_hint(context)
+            if alert_text:
+                hint = f"{hint} 同时浏览器还出现了弹窗信号：{alert_text}"
+            return "verified", snippet, True, context, snippet, hint
+
+    if alert_text:
+        evidence = f"浏览器出现弹窗：{alert_text}"
+        if browser_url:
+            evidence = f"{evidence} @ {browser_url}"
+        return "verified", evidence, True, "script", evidence, "虽然页面源码中没有直接找到稳定回显，但浏览器已经出现弹窗，这通常比单纯回显更接近真实执行结果。"
+
+    return "not_triggered", None, False, None, None, "没有在响应内容中直接观察到 payload 回显，可能需要换更匹配当前上下文的探针继续验证。"
+
+
 def _request_and_check(
     client: httpx.Client,
     driver: webdriver.Remote | None,
@@ -632,10 +907,17 @@ def _request_and_check(
     wait_seconds: float = 0.0,
 ) -> VerificationRecord:
     try:
-        if driver is not None and method == "get":
-            driver.get(target_url)
-            time.sleep(wait_seconds)
-            text = driver.page_source
+        alert_text = None
+        browser_url = None
+        if driver is not None:
+            text, alert_text, browser_url = _submit_with_driver(
+                driver,
+                page.url,
+                target_url,
+                method,
+                data,
+                wait_seconds,
+            )
             engine = "selenium"
         elif method == "post":
             response = client.post(target_url, data=data or {})
@@ -645,11 +927,11 @@ def _request_and_check(
             response = client.get(target_url, params=data or None)
             text = response.text
             engine = "http"
-        status, evidence, reflection_found, reflection_context, reflection_snippet, context_hint = _classify_response(
-            text, payload
+        status, evidence, reflection_found, reflection_context, reflection_snippet, context_hint = _classify_runtime_result(
+            text, payload, alert_text=alert_text, browser_url=browser_url
         )
     except Exception as exc:
-        engine = "selenium" if driver is not None and method == "get" else "http"
+        engine = "selenium" if driver is not None else "http"
         status = "error"
         evidence = f"{type(exc).__name__}: {exc}"
         reflection_found = False
@@ -673,7 +955,13 @@ def _request_and_check(
     )
 
 
-def _classify_response(text: str, payload: str) -> tuple[str, str | None, bool, str | None, str | None, str | None]:
+def _classify_response(
+    text: str,
+    payload: str,
+    *,
+    alert_text: str | None = None,
+    browser_url: str | None = None,
+) -> tuple[str, str | None, bool, str | None, str | None, str | None]:
     if not text:
         return "not_triggered", None, False, None, None, "响应内容为空，没有观察到可用于定位的回显信号。"
     candidates = [payload, html.escape(payload), payload.replace('"', "&quot;")]
@@ -734,12 +1022,17 @@ def _init_driver(timeout: float) -> webdriver.Remote:
         opts.add_argument("--headless")
         opts.add_argument("--no-sandbox")
         opts.add_argument("--disable-dev-shm-usage")
+        opts.add_argument("--window-size=1440,960")
+        opts.add_argument("--disable-blink-features=AutomationControlled")
+        opts.add_argument("--ignore-certificate-errors")
         driver = webdriver.Chrome(options=opts)
         driver.set_page_load_timeout(int(timeout))
         return driver
     except Exception:
         opts = FirefoxOptions()
         opts.add_argument("--headless")
+        opts.add_argument("--width=1440")
+        opts.add_argument("--height=960")
         driver = webdriver.Firefox(options=opts)
         driver.set_page_load_timeout(int(timeout))
         return driver

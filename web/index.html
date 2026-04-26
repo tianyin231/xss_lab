@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>XSSLab</title>
+    <title>XSS漏洞自动化挖掘工具</title>
     <link rel="stylesheet" href="./style.css" />
     <script src="./config.js"></script>
     <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
@@ -735,6 +735,37 @@
             }
           }
 
+          async function copyToClipboard(text, successMessage = '已复制') {
+            const value = String(text || '').trim()
+            if (!value) return
+            try {
+              if (navigator.clipboard?.writeText) {
+                await navigator.clipboard.writeText(value)
+              } else {
+                const textarea = document.createElement('textarea')
+                textarea.value = value
+                textarea.setAttribute('readonly', 'readonly')
+                textarea.style.position = 'fixed'
+                textarea.style.left = '-9999px'
+                document.body.appendChild(textarea)
+                textarea.select()
+                document.execCommand('copy')
+                textarea.remove()
+              }
+              alert(successMessage)
+            } catch (err) {
+              alert(`复制失败: ${err.message}`)
+            }
+          }
+
+          function applyVerificationPayload(item) {
+            if (!item?.payload) return
+            selectedRetestPreset.value = '__custom__'
+            customRetestPayload.value = item.payload
+            selectedRetestVector.value = item.vector || ''
+            findingRetestFeedback.value = '已带入动态验证成功的 payload，可直接执行单点复测。'
+          }
+
           function openModal(type, data) {
             activeModal.value = { type, data }
           }
@@ -984,6 +1015,7 @@
             selectedRetestPreset, selectedRetestVector, customRetestPayload, retestPayloadOptions,
             activeModal,
             formatDateTime, selectedPageFindings, selectedPageHighlightedHtml,
+            copyToClipboard, applyVerificationPayload,
             fetchJobs, fetchReport, createJob, stopJob, deleteJob, analyzeJob, fetchAIReport, exportReport,
             startResizeSidebar, startResizeLogs, startResizeDetail, openModal, closeModal, toggleDetailView, selectFinding, selectPage, selectAiReport, selectVerification, updateFindingStatus, retestSelectedFinding, runRetestFromControls, applyRetestPreset, toggleHelpView, toggleHelpItem, isHelpItemExpanded,
             openWorkbenchHome, openPageWorkbenchRedirect,

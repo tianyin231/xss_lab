@@ -777,6 +777,15 @@ def get_page_workbench(job_id: str) -> Response:
     ]
     manual_retest_reports = _build_manual_retest_reports(manual_retests)
     ai_multi_round_reports = _build_runtime_reports_v2(ai_multi_round_retests, source="ai_multi_round")
+    serialized_page_verifications = [_serialize_verification(item) for item in verifications]
+    serialized_manual_retests: list[dict[str, object]] = []
+    serialized_dynamic_results: list[dict[str, object]] = []
+
+    for item in serialized_page_verifications:
+        if item.get("source") == "manual_retest" and len(serialized_manual_retests) < 20:
+            serialized_manual_retests.append(item)
+        elif item.get("source") not in {"manual_retest", "ai_multi_round"} and len(serialized_dynamic_results) < 20:
+            serialized_dynamic_results.append(item)
 
     input_profile = _build_page_input_profile(page)
     return jsonify(
@@ -796,12 +805,13 @@ def get_page_workbench(job_id: str) -> Response:
             "risk_summary": _build_page_risk_summary(findings, verifications, input_profile),
             "repair_suggestions": _build_page_repair_suggestions(findings, input_profile),
             "related_findings": _serialize_workbench_findings(findings),
-            "manual_retests": [_serialize_verification(item) for item in manual_retests[:20]],
+            "manual_retests": serialized_manual_retests,
             "latest_manual_retest_report": manual_retest_reports[0] if manual_retest_reports else None,
             "manual_retest_reports": manual_retest_reports[:20],
             "latest_ai_multi_round_report": ai_multi_round_reports[0] if ai_multi_round_reports else None,
             "ai_multi_round_reports": ai_multi_round_reports[:10],
-            "dynamic_results": [_serialize_verification(item) for item in dynamic_results[:20]],
+            "dynamic_results": serialized_dynamic_results,
+            "successful_payloads": _build_successful_payloads(serialized_page_verifications),
             "payloads": suggest_payloads_for_page(page, findings),
             "retest_strategy": _build_page_retest_strategy(page, findings, input_profile),
         }
@@ -1056,6 +1066,8 @@ def _build_report_payload(job: Job, include_export_details: bool = False) -> dic
     pages.reverse()
     logs.reverse()
 
+    serialized_verifications = [_serialize_verification(item) for item in verifications]
+
     payload = {
         "export_generated_at": _to_beijing_iso(datetime.utcnow()),
         "job": {
@@ -1081,7 +1093,8 @@ def _build_report_payload(job: Job, include_export_details: bool = False) -> dic
         "dynamic_verification": {
             "enabled": get_bool("DYNAMIC_VERIFY_ENABLED", False),
             "stats": dict(verification_stats),
-            "results": [_serialize_verification(item) for item in verifications],
+            "results": serialized_verifications,
+            "successful_payloads": _build_successful_payloads(serialized_verifications),
         },
         "ai_reports": [_serialize_ai_report(item) for item in ai_reports],
         "pages": [
@@ -1441,6 +1454,62 @@ def _expected_vectors_for_instances(instances: list[dict[str, object]]) -> set[s
     return vectors
 
 
+def _build_verification_construction(
+    page_url: str,
+    target_url: str,
+    vector: str,
+    parameter_name: str | None,
+    payload: str,
+    reflection_snippet: str | None,
+) -> dict[str, object]:
+    page_url = str(page_url or "").strip()
+    target_url = str(target_url or "").strip()
+    vector = str(vector or "").strip().lower()
+    parameter_name = str(parameter_name or "").strip()
+    payload = str(payload or "").strip()
+    snippet = str(reflection_snippet or "").strip()
+
+    result: dict[str, object] = {
+        "before_target": page_url,
+        "after_target": target_url,
+        "request_construction": "",
+        "markup_construction": "",
+        "before_after_summary": "",
+    }
+
+    if vector == "query":
+        result["request_construction"] = f"将参数 {parameter_name or '-'} 替换为 payload 后访问目标地址。"
+        result["before_after_summary"] = f"原始页面地址与注入后地址的差异主要体现在查询参数 {parameter_name or '-'}。"
+        if target_url:
+            split_result = urlsplit(target_url)
+            pairs = parse_qsl(split_result.query, keep_blank_values=True)
+            matched = next((f"{key}={value}" for key, value in pairs if not parameter_name or key == parameter_name), "")
+            if matched:
+                result["mutated_part"] = matched
+    elif vector == "form":
+        field_names = [name.strip() for name in parameter_name.split(",") if name.strip()] if parameter_name else []
+        pseudo_fields = "\n".join([f'<input name="{name}" value="{payload}">' for name in field_names[:5]])
+        result["request_construction"] = f"将表单字段 {', '.join(field_names) if field_names else '-'} 统一填入 payload 后提交到目标地址。"
+        result["before_after_summary"] = "原始页面先解析表单，再把可提交字段替换为同一 payload 后发起提交。"
+        if pseudo_fields:
+            result["markup_construction"] = f'<form action="{target_url or page_url}" method="post">\n{pseudo_fields}\n</form>'
+    elif vector == "hash":
+        result["request_construction"] = "保持原始页面地址不变，仅把 payload 拼接到 URL 的 # 片段后。"
+        result["before_after_summary"] = "原始地址与注入后地址的差异主要体现在 hash 片段。"
+    else:
+        result["request_construction"] = "系统把 payload 带入当前输入向量后请求目标地址，再观察页面返回结果。"
+        result["before_after_summary"] = "原始地址与注入后目标地址之间存在输入构造差异。"
+
+    if snippet:
+        result["snippet_before"] = snippet.replace(payload, "[payload]")
+        result["snippet_after"] = snippet
+    else:
+        result["snippet_before"] = ""
+        result["snippet_after"] = ""
+
+    return result
+
+
 def _serialize_verification(item: DynamicVerification) -> dict[str, object]:
     detail = _parse_dynamic_evidence(item.evidence)
     explanation = _explain_dynamic_verification(
@@ -1448,6 +1517,14 @@ def _serialize_verification(item: DynamicVerification) -> dict[str, object]:
         item.status,
         item.parameter_name,
         detail["detail"],
+    )
+    construction = _build_verification_construction(
+        item.page_url,
+        item.target_url,
+        item.vector,
+        item.parameter_name,
+        item.payload,
+        detail["reflection_snippet"],
     )
     return {
         "id": item.id,
@@ -1478,7 +1555,86 @@ def _serialize_verification(item: DynamicVerification) -> dict[str, object]:
         "candidate_id": detail["candidate_id"],
         "round_reason": detail["round_reason"],
         "created_at": _to_beijing_iso(item.created_at),
+        "construction": construction,
     }
+
+
+def _build_successful_payloads(results: list[dict[str, object]]) -> list[dict[str, object]]:
+    successful: list[dict[str, object]] = []
+    seen: set[str] = set()
+
+    def _sort_key(item: dict[str, object]) -> tuple[int, int, str]:
+        level = str(item.get("level") or "")
+        return (
+            0 if level == "confirmed" else 1,
+            0 if item.get("reflection_found") else 1,
+            str(item.get("created_at") or ""),
+        )
+
+    for item in sorted(results, key=_sort_key):
+        level = str(item.get("level") or "")
+        reflection_found = bool(item.get("reflection_found"))
+        if level != "confirmed" and not reflection_found:
+            continue
+
+        payload = str(item.get("payload") or "").strip()
+        if not payload:
+            continue
+
+        vector = str(item.get("vector") or "").strip()
+        parameter_name = str(item.get("parameter_name") or "").strip()
+        target_url = str(item.get("target_url") or "").strip()
+        dedupe_key = "||".join([payload, vector, parameter_name, target_url])
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+
+        context_label = str(item.get("reflection_context_label") or "").strip()
+        reason = str(item.get("reason") or "").strip()
+        summary = str(item.get("summary") or "").strip()
+        explanation_parts = []
+        if context_label:
+            explanation_parts.append(f"该 payload 在{context_label}上下文中出现回显，说明输入已进入页面可利用位置。")
+        elif reflection_found:
+            explanation_parts.append("该 payload 已出现可识别回显，说明输入链路真实可达。")
+        if reason:
+            explanation_parts.append(reason)
+        elif summary:
+            explanation_parts.append(summary)
+
+        successful.append(
+            {
+                "id": item.get("id"),
+                "page_url": item.get("page_url"),
+                "target_url": target_url,
+                "vector": vector,
+                "parameter_name": parameter_name,
+                "payload": payload,
+                "level": level,
+                "level_label": item.get("level_label"),
+                "summary": summary,
+                "reason": reason,
+                "recommendation": item.get("recommendation"),
+                "reflection_found": reflection_found,
+                "reflection_context": item.get("reflection_context"),
+                "reflection_context_label": context_label,
+                "reflection_snippet": item.get("reflection_snippet"),
+                "context_hint": item.get("context_hint"),
+                "created_at": item.get("created_at"),
+                "construction": _build_verification_construction(
+                    str(item.get("page_url") or ""),
+                    target_url,
+                    vector,
+                    parameter_name,
+                    payload,
+                    item.get("reflection_snippet"),
+                ),
+                "usage_tip": "建议优先把这个 payload 带入单点复测，继续验证同一向量和参数。",
+                "why_it_worked": " ".join(part for part in explanation_parts if part).strip(),
+            }
+        )
+
+    return successful
 
 
 def _serialize_ai_report(item: AIReport) -> dict[str, object]:

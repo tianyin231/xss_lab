@@ -69,7 +69,7 @@ def create_app() -> Flask:
     def _root() -> Any:
         return jsonify(
             {
-                "name": str(get("SYSTEM_NAME", "XSSLab")),
+                "name": str(get("SYSTEM_NAME", "XSS漏洞自动化挖掘工具")),
                 "version": str(get("SYSTEM_VERSION", "0.1.0")),
                 "api_base": "/api",
                 "health": "ok",

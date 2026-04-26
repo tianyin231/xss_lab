@@ -464,11 +464,30 @@ export const HELP_SECTIONS = [
         q: 'query、form、hash 三种向量有什么区别？',
         a: '它们都是输入进入页面的路径，但进入页面的方式和典型使用场景不同。',
         details: [
-          'query 来自 URL 查询参数，最常见，也最容易与反射型或 DOM 型处理逻辑结合。',
-          'form 来自表单字段，适合测试页面提交、回显、客户端拼接逻辑。',
-          'hash 来自 location.hash，常用于前端路由、片段定位和纯浏览器端 DOM 处理。'
+          'query（查询参数验证）：逐个替换URL查询参数进行测试，最常见，也最容易与反射型或 DOM 型处理逻辑结合。',
+          'form（表单验证）：统一填充表单所有字段进行测试，适合测试页面提交、回显、客户端拼接逻辑。',
+          'hash（片段标识符验证）：基于URL片段（#号后内容）的注入测试，来自 location.hash，常用于前端路由、片段定位和纯浏览器端 DOM 处理。'
         ],
         bullets: [
+          ' query 方法:',
+          '原始URL: http://example.com/page?name=John&age=25&city=Beijing',
+          '1. http://example.com/page?name=<script>alert(1)</script>&age=25&city=Beijing',
+          '2. http://example.com/page?name=John&age=<script>alert(1)</script>&city=Beijing  ',
+          '3. http://example.com/page?name=John&age=25&city=<script>alert(1)</script>',
+          ' form 方法:',
+          '<form method="POST" action="/submit">',
+          '< input name = "username" value = "" >',
+          '<input name="email" value="">',
+          '<textarea name="comment"></textarea>',
+          '</form>',
+          'POST /submit',
+          'username=<script>alert(1)</script>',
+          'email=<script>alert(1)</script>',
+          'comment=<script>alert(1)</script>',
+          'hash 方法:',
+          '原始URL: http://example.com/page',
+          '生成测试URL: http://example.com/page#<script>alert(1)</script>',
+
           '如果页面大量依赖前端路由，hash 往往很重要。',
           '如果页面有搜索框、过滤器、表单回显，form 和 query 更值得优先试。'
         ],
@@ -681,6 +700,168 @@ export const HELP_SECTIONS = [
           '最后结合源码和发现项做人工判断。'
         ],
         tags: ['FAQ', '单点复测', '结果解释'],
+        resources: []
+      },
+      {
+        id: 'faq_dynamic_payload_selection',
+        q: '动态验证时，系统是怎么选 payload 的？',
+        a: '当前系统选 payload 的过程不是“从列表里随便拿一个”，而是先判断页面有哪些输入向量，再判断哪个向量更值得优先验证，最后才在该向量下挑最贴近当前页面上下文的 payload。',
+        details: [
+          '第一步，系统先判断页面具备哪些输入面。它会检查 URL 里有没有查询参数、页面源码里有没有表单、脚本里有没有 location.hash 一类痕迹，从而得到当前页面可测的 query、form、hash 向量集合。',
+          '第二步，系统再看已有静态线索更偏向哪个向量。比如 finding 证据里出现了 location.search、document.URL、query 等信息时，会更偏向 query；出现 form、input、textarea、select 时，会更偏向 form；出现 location.hash、hashchange 时，会更偏向 hash。',
+          '第三步，在已经确定的向量下，系统会从推荐 payload 列表里找最先匹配该向量的 payload。也就是说，query 优先找 query 方向的 payload，form 优先找 form 方向的 payload，hash 优先找 hash 方向的 payload。',
+          '第四步，如果当前向量下没有明确匹配的推荐 payload，系统才会退一步，从推荐列表里拿第一个还能用的 payload；如果连推荐列表都给不出有效结果，最后才回退到最基础的默认探针。'
+        ],
+        bullets: [
+          '先判断输入面，再判断优先向量，再选 payload。',
+          '推荐 payload 是主入口，默认探针只负责兜底。'
+        ],
+        tags: ['FAQ', '动态验证', 'payload', '选择机制'],
+        resources: []
+      },
+      {
+        id: 'faq_dynamic_injection_method',
+        q: '动态验证把 payload 注入到页面里的方式是什么？',
+        a: '系统当前采用的是按页面输入面逐步判断的轻量注入方式，不是直接把一个 payload 到处乱打一遍，而是先识别页面有哪些可用输入向量，再按 query、form、hash 的顺序决定怎么注入。',
+        details: [
+          '第一步是判断当前页面有哪些输入面。系统会先看页面 URL 里有没有查询参数；如果有，就说明 query 向量可以测。然后再看页面 HTML 源码里有没有 <form 标签；如果有，就说明 form 向量可以测。最后再看页面源码和相关线索里有没有 location.hash、hashchange、decodeURIComponent(location.hash) 这类痕迹；如果有，就说明 hash 向量值得测。',
+          '第二步是决定优先测哪些向量。系统会先结合已有 finding 的标题、证据、source/sink 线索来猜这个页面更像 query、form 还是 hash 驱动；如果静态线索已经指向某个向量，就先测那个向量。如果静态线索不够明显，再退回到页面本身具备的输入面，也就是“有 query 就测 query，有表单就测 form，有 hash 痕迹就测 hash”。',
+          '第三步是按不同向量构造请求。query 模式下，系统会解析 URL 查询参数，逐个参数替换成 payload，其他参数保持不变，因此一次 query 验证通常会生成多次请求，每次只改一个参数。这样做的目的，是尽量知道“到底是哪个参数把 payload 带进了页面”。',
+          '第四步是发现和处理表单。系统会直接解析当前页面 HTML，查找所有 <form 元素，然后在每个表单里提取 input、textarea、select 这些可提交字段；像 submit、button、image、reset、file 这类不适合做验证的字段会被跳过。如果一个表单没有可用字段，就不会对它发请求。',
+          '第五步是执行 form 注入。对每个表单，系统会读取它的 action 和 method：如果没有 action，就默认提交回当前页面；如果没有 method，就按 GET 处理。然后把当前表单里最多前几个可提交字段统一填成同一个 payload，再按原本的 GET 或 POST 方式请求目标地址。',
+          '第六步是处理 hash。hash 模式不会像 query 和 form 那样真正改请求参数，而是把 payload 拼到 URL 的 # 后面，形成新的目标地址。它的核心目的是验证页面前端是否会读取 location.hash 并把它带入 DOM 或脚本逻辑，所以它更偏浏览器侧链路试探。',
+          '最后一步才是看页面响应。系统会拿到返回内容后，再判断 payload 有没有回显、回显大概落在什么上下文，并据此给出 confirmed、suspected 或 not_triggered 这类结果。'
+        ],
+        bullets: [
+          '先判断输入面，再决定向量，再构造对应请求。',
+          'query 是逐个参数替换，form 是按表单结构填充，hash 是 URL 片段试探。'
+        ],
+        tags: ['FAQ', '动态验证', '注入方式', 'query', 'form', 'hash'],
+        resources: []
+      },
+      {
+        id: 'faq_dynamic_success_judgement',
+        q: '系统怎么判断一次动态验证算成功？',
+        a: '当前动态验证的成功判定更偏“输入链路和回显证据是否成立”，不是直接以“浏览器里已经弹窗”作为唯一标准。',
+        details: [
+          '第一步，系统先把请求发出去，拿到返回内容；如果是 GET 并且启用了 Selenium，也可能直接读取浏览器渲染后的页面源码。',
+          '第二步，系统会在返回内容里查找 payload 本体、HTML 转义后的 payload、以及常见的引号转义版本。如果能找到这些内容，就说明输入至少被带回到了响应或页面内容里。',
+          '第三步，一旦找到命中位置，系统会截取命中前后的一小段片段，作为证据；同时再根据附近结构去粗略猜测上下文更像 HTML 文本、属性、脚本片段还是其他位置。',
+          '第四步，系统根据这个结果给状态分级：如果观察到稳定回显，通常会转成 confirmed；如果只是弱信号、hash 线索或不够稳定的场景，通常会转成 suspected；如果没有找到明显命中，就会是 not_triggered；请求过程报错则会记为 error。',
+          '所以它真正回答的是“payload 有没有被带回来、带回来后大概落在哪”，而不是自动代替人工宣布漏洞已经完全成立。'
+        ],
+        bullets: [
+          'confirmed 更像“稳定观察到回显并形成较强证据”。',
+          'suspected 更像“链路可能存在，但证据还不够硬”。',
+          'not_triggered 不等于绝对安全。'
+        ],
+        tags: ['FAQ', '动态验证', '成功判定', 'confirmed', 'suspected'],
+        resources: []
+      },
+      {
+        id: 'faq_retest_payload_mechanism',
+        q: '复测功能里的 payload 机制和动态验证有什么关系？',
+        a: '两者底层逻辑是同一套页面输入面验证思路，但复测给你的控制权更高：你可以沿用系统推荐、直接复用成功 payload，或者自己指定 payload 和向量。',
+        details: [
+          '第一种情况是你不手动指定 payload。此时复测会像动态验证一样，先根据当前页面和向量去挑推荐 payload，而不是默认固定只打一条基础探针。',
+          '第二种情况是你直接从成功结果继续往下测。现在报告页和工作台都会把成功 payload 单独展示出来，并支持一键带入复测，这样你可以围绕已经命中过的 payload 继续验证同一输入面。',
+          '第三种情况是你想手工控制验证。此时你可以自己指定 payload，也可以自己指定 query、form、hash 向量，系统就会跳过自动推荐，按你选的组合直接发起页面级验证。',
+          '因此复测更像一个“可操作的验证面板”，而动态验证更像“系统自动先跑一轮”，两者不是互相替代，而是前后衔接。'
+        ],
+        bullets: [
+          '不手改时，复测优先沿用推荐 payload。',
+          '已有成功 payload 时，可以直接复用它继续测。',
+          '想精细控制时，也可以完全手动指定。'
+        ],
+        tags: ['FAQ', '复测', 'payload', '成功 payload', '工作台'],
+        resources: []
+      },
+      {
+        id: 'faq_ai_multi_round_validation',
+        q: 'AI 辅助多轮验证是做什么的？它是怎么运转的？',
+        a: 'AI 多轮验证的作用不是直接宣布漏洞成立，而是帮系统在一个页面上更有顺序地尝试多组探针，减少盲试，让“先测什么、后测什么”更像人工分析流程。',
+        details: [
+          '第一步，系统先收集页面上下文，包括页面 URL、内容类型、输入面画像、风险摘要、关联 finding 和当前候选安全探针。',
+          '第二步，系统把这些候选探针交给 AI，请它给出一个多轮计划。这个计划不是让 AI 自己临时编造 payload，而是从系统已经准备好的候选项里挑出更值得优先尝试的几轮，并说明每轮为什么先测它。',
+          '第三步，如果 AI 成功给出计划，系统就按 AI 推荐的顺序执行；如果 AI 没有返回可用方案，系统就退回到自己的候选顺序，也就是直接按当前页面最常见、最稳妥的探针顺序去跑。',
+          '第四步，系统会把每一轮的向量、payload、原因和结果单独记录下来，所以你最后看到的不只是“有无结果”，而是“第几轮、为什么测它、这一轮出了什么结果”。',
+          '第五步，工作台会再把这些轮次结果做汇总，帮你判断哪一轮最匹配当前页面、哪一轮已经出现 confirmed、哪一轮只是部分信号，以及后续最值得继续人工复核的方向。'
+        ],
+        bullets: [
+          'AI 负责推荐轮次顺序，不直接替你裁定漏洞成立。',
+          'AI 选的是系统候选探针，不是无限制自由生成。',
+          '每一轮都会单独记录，最后再统一汇总。'
+        ],
+        tags: ['FAQ', 'AI 多轮验证', '验证计划', '工作机制'],
+        resources: []
+      },
+      {
+        id: 'faq_payload_fallback',
+        q: '什么时候系统会回退到最基础的默认探针？',
+        a: '只有当前页面和当前向量下都拿不到更合适的推荐 payload 时，系统才会回退到最基础的默认探针，它的角色更像兜底，而不是主力验证 payload。',
+        details: [
+          '如果系统已经能判断页面更像 query、form 或 hash 场景，并且推荐列表里有对应向量的 payload，就会优先用这些更贴近场景的候选。',
+          '如果推荐列表里没有当前向量的 payload，但还有其他可用推荐项，系统会先尝试这些候选，而不是立刻回到最基础探针。',
+          '只有推荐项整体都不够用、或者当前页面的线索太少、实在无法判断该用哪类 payload 时，系统才会启用默认探针，用来先确认输入链路是否存在。'
+        ],
+        bullets: [
+          '默认探针主要负责兜底确认链路。',
+          '页面线索越明确，回退到默认探针的概率越低。'
+        ],
+        tags: ['FAQ', 'payload', 'fallback', '默认探针'],
+        resources: []
+      },
+      {
+        id: 'faq_successful_payload_reuse',
+        q: '动态验证成功后的 payload，是怎么继续被系统利用的？',
+        a: '成功 payload 不会只停留在结果列表里，它会被提炼成更高优先级的复测入口，供你继续围绕同一页面、同一向量、同一参数做验证。',
+        details: [
+          '系统会先从动态验证结果里筛出 confirmed 或已有明显回显信号的结果，再整理成成功 payload 摘要，单独展示在报告页和页面工作台里。',
+          '这些成功 payload 会保留它原来的关键信息，例如向量、参数名、目标地址、上下文提示和命中片段，这样你复测时不会只拿到一个孤立字符串。',
+          '当你点击“带入复测”时，系统会把这个 payload 直接填回应的复测输入框，并同步它原本的向量，帮助你继续验证同一条输入路径，而不是重新从零开始试。'
+        ],
+        bullets: [
+          '成功 payload 会被单独提炼出来。',
+          '复测时会连同原有向量信息一起带入。'
+        ],
+        tags: ['FAQ', '成功 payload', '复测', '复用机制'],
+        resources: []
+      },
+      {
+        id: 'faq_ai_round_selection',
+        q: 'AI 多轮验证里，系统是怎么决定一共跑几轮、每轮测什么的？',
+        a: '轮次数量不是固定写死的，而是由当前模式和候选探针数量共同决定；每一轮测什么，则取决于 AI 计划或系统兜底顺序里挑中的候选项。',
+        details: [
+          '系统先根据 quick、standard、deep 这类模式，决定本次多轮验证最多允许跑多少轮；模式越深，允许的轮数越多。',
+          '然后系统会先准备一批候选探针，每个候选项都自带自己的向量、payload、上下文类型和推荐原因。',
+          '如果 AI 计划可用，系统就从这些候选项里按 AI 选中的 candidate_id 提取对应轮次；如果 AI 计划不可用，系统就直接按候选列表当前的顺序取前几轮。',
+          '所以“每轮测什么”本质上不是随机决定的，而是从系统已经准备好的候选探针中按顺序挑出来执行。'
+        ],
+        bullets: [
+          '模式决定最多跑几轮。',
+          '候选探针决定每轮能测什么。',
+          'AI 失败时，系统会自动退回兜底轮次顺序。'
+        ],
+        tags: ['FAQ', 'AI 多轮验证', '轮次', '候选探针'],
+        resources: []
+      },
+      {
+        id: 'faq_selenium_dynamic_verify',
+        q: 'Selenium 在动态验证里是做什么的？为什么开启和不开启的结果会有出入，哪个更准？',
+        a: 'Selenium 的作用，是让动态验证更接近“真实浏览器访问页面”的过程；不开启时更像看原始 HTTP 响应，开启后则会让浏览器真正打开页面、运行脚本、处理 hash 和提交表单，所以两边结果出现差异是正常的。',
+        details: [
+          '不开启 Selenium 时，系统主要通过普通 HTTP 请求拿响应文本，再检查 payload 有没有出现在返回内容里。这种方式更快、更稳定，但它看到的是“服务器返回了什么”。',
+          '开启 Selenium 后，系统会真的驱动浏览器去打开目标地址；如果是 query 或 hash 场景，会读取浏览器渲染后的页面结果；如果是表单场景，也会通过浏览器侧提交表单，而不是只用 HTTP 客户端直接发 POST。这样它看到的是“浏览器最终渲染成了什么、脚本运行后发生了什么”。',
+          '结果之所以会有出入，通常是因为页面里存在前端渲染、异步脚本、location.hash 处理、事件触发、前端路由或脚本拼接逻辑。不开启 Selenium 时，这些浏览器侧行为往往不会被完整复现；开启后，浏览器把这些逻辑跑起来，结果就更容易接近真实用户访问时看到的页面。',
+          '哪个更准要分场景看：如果只是普通服务端回显、表单回显或静态响应检查，不开 Selenium 往往已经够用，而且更稳；如果页面强依赖 JavaScript、DOM 更新、hash 路由、动态渲染，开启 Selenium 通常更接近真实结果。',
+          '因此最稳妥的理解方式是：不开 Selenium 更适合快速第一轮验证，开启 Selenium 更适合做更接近真实浏览器行为的补充确认。两者不是互相否定，而是适合不同验证层次。'
+        ],
+        bullets: [
+          '不开 Selenium 更像“看响应文本”。',
+          '开 Selenium 更像“看浏览器最终页面和脚本执行结果”。',
+          '对前端驱动场景，Selenium 通常更接近真实结果。'
+        ],
+        tags: ['FAQ', 'Selenium', '动态验证', '浏览器验证'],
         resources: []
       },
       {

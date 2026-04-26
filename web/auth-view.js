@@ -2,7 +2,7 @@ export const AUTH_TEMPLATE = `
   <div class="authShell">
     <section class="authCard">
       <div class="authBrand">
-        <div class="authEyebrow">XSSLab</div>
+        <div class="authEyebrow">XSS漏洞自动化挖掘工具</div>
         <h1 class="authTitle">{{ authMode === 'login' ? '登录系统' : '注册账号' }}</h1>
         <p class="authText">
           {{ authMode === 'login'
