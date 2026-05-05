@@ -1,6 +1,6 @@
-﻿import { PAGE_WORKBENCH_TEMPLATE } from './page-workbench-view-v2.js'
+﻿import { PAGE_WORKBENCH_TEMPLATE } from './page-workbench-view.js'
 
-const { createApp, ref, computed, onMounted, watch } = Vue
+const { createApp, ref, computed, onMounted, watch, nextTick } = Vue
 
 createApp({
   setup() {
@@ -31,6 +31,15 @@ createApp({
     const workbenchSelectedPreset = ref('__default__')
     const workbenchSelectedVector = ref('')
     const workbenchCustomPayload = ref('')
+    const aiPayloadMode = ref('exploit')
+    const aiPayloadLoading = ref(false)
+    const aiPayloadError = ref('')
+    const aiPayloadResult = ref(null)
+    const aiPayloadRetestingIdx = ref(-1)
+    const aiPayloadRetestResults = ref({})
+    const aiPayloadExpandedReportId = ref(null)
+    const retestRecordsExpanded = ref(true)
+    const payloadResultsExpanded = ref(true)
 
     const selectedJob = computed(() => jobs.value.find(item => item.id === selectedJobId.value) || null)
     const selectedPage = computed(() => pages.value.find(item => item.url === selectedPageUrl.value) || null)
@@ -202,6 +211,11 @@ createApp({
       aiExplainResult.value = ''
       aiValidateError.value = ''
       aiValidateResult.value = null
+      aiPayloadError.value = ''
+      aiPayloadResult.value = null
+      aiPayloadRetestingIdx.value = -1
+      aiPayloadRetestResults.value = {}
+      aiPayloadExpandedReportId.value = null
       workbenchSelectedPreset.value = '__default__'
       workbenchSelectedVector.value = ''
       workbenchCustomPayload.value = ''
@@ -279,6 +293,62 @@ createApp({
       workbenchCustomPayload.value = item.payload
       workbenchSelectedVector.value = item.vector || ''
       workbenchRetestFeedback.value = '已带入动态验证成功的 payload，可直接开始复测。'
+      nextTick(() => {
+        const el = document.getElementById('retest-section')
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      })
+    }
+
+    function applyAIGeneratedPayload(item) {
+      if (!item?.payload) return
+      workbenchSelectedPreset.value = '__custom__'
+      workbenchCustomPayload.value = item.payload
+      workbenchSelectedVector.value = item.vector || ''
+      workbenchRetestFeedback.value = '已带入 AI 生成的 payload，可直接开始复测。'
+      nextTick(() => {
+        const el = document.getElementById('retest-section')
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      })
+    }
+
+    function toggleAIPayloadReport(reportId) {
+      aiPayloadExpandedReportId.value = aiPayloadExpandedReportId.value === reportId ? null : reportId
+    }
+
+    async function retestAIPayload(item, idx) {
+      if (!selectedJobId.value || !workbenchData.value?.page?.url || !item?.payload) return
+      aiPayloadRetestingIdx.value = idx
+      try {
+        const res = await fetch(`${apiBase.value}/jobs/${selectedJobId.value}/pages/retest`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            url: workbenchData.value.page.url,
+            payload: item.payload,
+            vector: item.vector || '',
+          }),
+        })
+        const body = await res.json()
+        if (!res.ok) throw new Error(body.error || '复测失败')
+        const results = body.results || []
+        const confirmed = results.filter(r => r.level === 'confirmed')
+        aiPayloadRetestResults.value = {
+          ...aiPayloadRetestResults.value,
+          [idx]: {
+            status: confirmed.length ? 'confirmed' : (results.some(r => r.level === 'suspected') ? 'suspected' : 'not_triggered'),
+            summary: confirmed.length ? `已确认 (${confirmed.length}/${results.length})` : (results.length ? `未确认 (${results.length} 条结果)` : '无结果'),
+            results,
+          },
+        }
+        await refreshWorkbench()
+      } catch (err) {
+        aiPayloadRetestResults.value = {
+          ...aiPayloadRetestResults.value,
+          [idx]: { status: 'error', summary: err.message, results: [] },
+        }
+      } finally {
+        aiPayloadRetestingIdx.value = -1
+      }
     }
 
     async function runWorkbenchRetest() {
@@ -413,6 +483,32 @@ createApp({
       selectedAIMultiRoundReportId.value = batchId
     }
 
+    async function runAIGeneratePayload(findingKind, findingTitle) {
+      if (!selectedJobId.value || !selectedPageUrl.value) return
+      aiPayloadLoading.value = true
+      aiPayloadError.value = ''
+      aiPayloadResult.value = null
+      try {
+        const res = await fetch(`${apiBase.value}/jobs/${selectedJobId.value}/pages/ai-generate-payload`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            url: selectedPageUrl.value,
+            finding_kind: findingKind || '',
+            finding_title: findingTitle || '',
+            mode: aiPayloadMode.value,
+          }),
+        })
+        const body = await res.json()
+        if (!res.ok) throw new Error(body.error || 'AI生成Payload失败')
+        aiPayloadResult.value = body
+      } catch (err) {
+        aiPayloadError.value = err.message
+      } finally {
+        aiPayloadLoading.value = false
+      }
+    }
+
     async function deleteAIMultiRoundReport(batchId) {
       if (!selectedJobId.value || !selectedPageUrl.value || !batchId) return
       if (!window.confirm('确定删除这份 AI 多轮验证记录吗？')) return
@@ -515,6 +611,15 @@ createApp({
       aiValidateLoading,
       aiValidateError,
       aiValidateResult,
+      aiPayloadMode,
+      aiPayloadLoading,
+      aiPayloadError,
+      aiPayloadResult,
+      aiPayloadRetestingIdx,
+      aiPayloadRetestResults,
+      aiPayloadExpandedReportId,
+      retestRecordsExpanded,
+      payloadResultsExpanded,
       selectedAIMultiRoundReportId,
       deletingAIMultiRoundReportId,
       currentRetestReport,
@@ -529,6 +634,7 @@ createApp({
       formatDateTime,
       copyToClipboard,
       applySuccessfulPayload,
+      applyAIGeneratedPayload,
       applyWorkbenchRetestPreset,
       runWorkbenchRetest,
       refreshWorkbench,
@@ -537,6 +643,9 @@ createApp({
       deleteRetestResult,
       runAIExplain,
       runAIMultiRoundValidation,
+      runAIGeneratePayload,
+      retestAIPayload,
+      toggleAIPayloadReport,
       selectAIMultiRoundReport,
       deleteAIMultiRoundReport,
       openSelectedWorkbench,

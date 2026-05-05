@@ -47,6 +47,16 @@ class AIAnalyzer:
                 "plan": None,
             }
 
+    def generate_payloads(self, finding_context: Dict[str, Any], page_html: str, mode: str = "exploit") -> Dict[str, Any]:
+        try:
+            return self.ai_client.generate_payloads(finding_context, page_html, mode)
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e),
+                "payloads": None,
+            }
+
 
 def get_analyzer(model: Optional[str] = None) -> AIAnalyzer:
     return AIAnalyzer(model)

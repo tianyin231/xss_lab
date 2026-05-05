@@ -78,6 +78,71 @@ class AIModelAPI:
             },
         }
 
+    def generate_payloads(
+        self,
+        finding_context: Dict[str, Any],
+        page_html: str,
+        mode: str = "exploit",
+    ) -> Dict[str, Any]:
+        if not self.enabled:
+            raise RuntimeError("AI analysis is disabled")
+        if not self.api_key:
+            raise RuntimeError("AI_API_KEY is not configured")
+
+        prompt = self._build_payload_generation_prompt(finding_context, page_html, mode)
+        result = self._call_chat(
+            prompt,
+            system_content="你是一位精通 XSS 漏洞利用与防御的安全专家，擅长根据页面上下文生成精准的验证 Payload。",
+        )
+        return {
+            "success": True,
+            "payloads": {
+                "mode": mode,
+                "content": result,
+                "summary": result[:500] + "..." if len(result) > 500 else result,
+            },
+        }
+
+    def _build_payload_generation_prompt(
+        self,
+        finding_context: Dict[str, Any],
+        page_html: str,
+        mode: str,
+    ) -> str:
+        snippet_html = page_html[:3000] if page_html else ""
+
+        mode_instruction = {
+            "probe": (
+                "你必须只生成非执行型的安全探针 payload，例如独特的标记字符串（如 xsslab_ai_probe_<random>）。"
+                "不要生成任何可执行的标签、事件处理器或脚本。目标是确认输入链路是否存在，而不是触发执行。"
+            ),
+            "exploit": (
+                "你可以生成真实的 XSS 利用 payload，包括标签注入、属性逃逸、JavaScript 字符串闭合、"
+                "协议注入等。目标是尽可能触发可观察的执行或回显信号。"
+            ),
+        }.get(mode, "请根据上下文生成合适的验证 payload。")
+
+        finding_json = json.dumps(finding_context, ensure_ascii=False, indent=2)
+
+        return (
+            "你需要为一个 XSS 漏洞扫描工具生成验证 Payload。\n\n"
+            f"【模式要求】\n{mode_instruction}\n\n"
+            "【漏洞上下文】\n"
+            f"{finding_json}\n\n"
+            "【页面 HTML 片段】\n"
+            f"{snippet_html}\n\n"
+            "【输出要求】\n"
+            "1. 输出严格 JSON，格式：\n"
+            '{"payloads":[{"payload":"具体payload","vector":"query或form或hash",'
+            '"context":"script或html_text或html_attr","reason":"为什么这个payload应该有效"}]}\n'
+            "2. 最多生成 5 个 payload，按优先级从高到低排列\n"
+            "3. 每个 payload 必须结合具体漏洞上下文（source、sink、flow_display）来设计\n"
+            "4. vector 必须从 query/form/hash 中选择，基于漏洞的数据流路径判断\n"
+            "5. context 必须从 script/html_text/html_attr 中选择，基于 sink 类型判断\n"
+            "6. reason 必须具体说明为什么这个 payload 针对当前漏洞上下文有效\n"
+            "7. 不要输出 JSON 以外的任何内容"
+        )
+
     def _build_analysis_prompt(self, html: str, test_result: Dict[str, Any]) -> str:
         snippet = html[:4000] if html else ""
         return (

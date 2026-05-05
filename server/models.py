@@ -139,6 +139,22 @@ class DynamicVerification(db.Model):
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
 
+class AIPayloadReport(db.Model):
+    __tablename__ = "ai_payload_reports"
+    __table_args__ = (
+        Index("ix_ai_payload_reports_job_id_page_url", "job_id", "page_url"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    job_id = db.Column(db.String(36), index=True, nullable=False)
+    page_url = db.Column(db.Text, nullable=False)
+    finding_kind = db.Column(db.String(64), nullable=True)
+    finding_title = db.Column(db.String(255), nullable=True)
+    mode = db.Column(db.String(16), nullable=False, default="exploit")
+    payloads_json = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+
 class FindingStatus(db.Model):
     __tablename__ = "finding_statuses"
     __table_args__ = (

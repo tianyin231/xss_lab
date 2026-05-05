@@ -6,6 +6,8 @@ import re
 from dataclasses import dataclass
 from typing import Iterable
 
+from server.js_ast_analyzer import analyze_script_flows as _ast_analyze
+
 
 @dataclass(frozen=True)
 class StaticFinding:
@@ -173,76 +175,7 @@ def _line_of_offset(text: str, offset: int) -> int:
 
 
 def _analyze_script_flows(html: str, add) -> None:
-    for script_match in SCRIPT_BLOCK_RE.finditer(html):
-        script_body = script_match.group("body") or ""
-        if not script_body.strip():
-            continue
-        base_offset = script_match.start("body")
-        tainted_vars: dict[str, dict[str, object]] = {}
-        for raw_statement, start in _split_statements(script_body):
-            statement = raw_statement.strip()
-            if not statement:
-                continue
-
-            line = _line_of_offset(html, base_offset + start)
-
-            assign_match = ASSIGN_RE.match(statement)
-            if assign_match:
-                flow = _find_source_flow(assign_match.group(2).strip(), tainted_vars)
-                if flow:
-                    tainted_vars[assign_match.group(1)] = {
-                        "source": flow["source"],
-                        "path": list(flow.get("path") or []) + [assign_match.group(1)],
-                    }
-
-            sink_match = SINK_ASSIGN_RE.match(statement)
-            if sink_match:
-                flow = _find_source_flow(sink_match.group(2).strip(), tainted_vars)
-                if flow:
-                    sink_target = sink_match.group(1).strip()
-                    flow_display = _build_flow_display(flow["source"], flow.get("path") or [], sink_target)
-                    add(
-                        "ast_data_flow",
-                        "high",
-                        "Script data flow to dangerous sink",
-                        statement,
-                        line,
-                        flow_display,
-                        {
-                            "source": flow["source"],
-                            "path": flow.get("path") or [],
-                            "sink": sink_target,
-                            "flow_display": flow_display,
-                        },
-                    )
-
-            for pattern, sink_label in (
-                (INSERT_HTML_RE, "insertAdjacentHTML"),
-                (WRITE_RE, "document.write"),
-                (EVAL_RE, "eval/setTimeout"),
-                (HTML_CALL_RE, "jquery.html"),
-            ):
-                call_match = pattern.search(statement)
-                if not call_match:
-                    continue
-                flow = _find_source_flow(call_match.group(1).strip(), tainted_vars)
-                if flow:
-                    flow_display = _build_flow_display(flow["source"], flow.get("path") or [], sink_label)
-                    add(
-                        "ast_data_flow",
-                        "high",
-                        "Script data flow to dangerous sink",
-                        statement,
-                        line,
-                        flow_display,
-                        {
-                            "source": flow["source"],
-                            "path": flow.get("path") or [],
-                            "sink": sink_label,
-                            "flow_display": flow_display,
-                        },
-                    )
-                    break
+    _ast_analyze(html, add)
 
 
 def _split_statements(script: str) -> list[tuple[str, int]]:

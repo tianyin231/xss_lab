@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python)",
+      "Bash(python create_docx.py)",
+      "Bash(python generate_thesis.py)",
+      "Bash(npm --version)",
+      "Bash(python --version)",
+      "Bash(python -c \"import sys; print\\(sys.version\\)\")",
+      "WebSearch",
+      "Bash(npm list *)",
+      "Bash(pip list *)",
+      "Bash(pip install *)",
+      "Bash(python -c ' *)",
+      "Bash(git rm *)",
+      "Bash(python -c \"import flask; print\\('Flask OK'\\)\")",
+      "Bash(python -c \"import scrapy; print\\('Scrapy OK'\\)\")",
+      "Bash(python -c \"from server import create_app; app = create_app\\(\\); print\\('App created OK'\\)\")"
+    ]
+  }
+}

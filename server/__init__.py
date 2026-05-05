@@ -7,8 +7,7 @@ from __future__ import annotations
 import os
 
 from app_config import get, get_int
-from flask import Flask
-from flask import jsonify
+from flask import Flask, Response, jsonify
 from flask_cors import CORS
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine.url import make_url
@@ -62,11 +61,11 @@ def create_app() -> Flask:
     app.register_blueprint(api_bp, url_prefix="/api")
 
     @app.get("/favicon.ico")
-    def _favicon() -> Any:
+    def _favicon() -> Response:
         return "", 204
 
     @app.get("/")
-    def _root() -> Any:
+    def _root() -> Response:
         return jsonify(
             {
                 "name": str(get("SYSTEM_NAME", "XSS漏洞自动化挖掘工具")),

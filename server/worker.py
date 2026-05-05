@@ -95,15 +95,16 @@ class LogPushExtension:
     @classmethod
     def from_crawler(cls, crawler):
         ext = cls()
+        ext._crawler = crawler
+        ext._handler = None
         crawler.signals.connect(ext.spider_opened, signal=signals.spider_opened)
-        handler = LogPushHandler(crawler.spider)
-        logging.getLogger().addHandler(handler)
         t = threading.Thread(target=ext._stop_monitor, args=(crawler,), daemon=True)
         t.start()
         return ext
 
     def spider_opened(self, spider):
-        pass
+        self._handler = LogPushHandler(spider)
+        logging.getLogger().addHandler(self._handler)
 
     def _stop_monitor(self, crawler):
         """每秒检查一次是否需要停止 Scrapy 引擎"""

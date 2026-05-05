@@ -2263,6 +2263,44 @@ body {
   margin-bottom: 14px;
 }
 
+.workbenchSectionHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 14px;
+}
+
+.workbenchSectionHeader .workbenchSectionTitle {
+  margin-bottom: 4px;
+}
+
+.workbenchSectionSub {
+  color: var(--text-soft);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.workbenchMiniStats {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 220px;
+}
+
+.workbenchMiniStats span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.06);
+  color: var(--text-soft);
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .workbenchInfoGrid,
 .workbenchStats,
 .workbenchSplit,
@@ -2405,6 +2443,204 @@ body {
 
 .workbenchRetestCard {
   margin-top: 0;
+}
+
+.workbenchPayloadPanel {
+  border-color: rgba(37, 99, 235, 0.16);
+}
+
+.payloadControlCard {
+  margin-top: 14px;
+  border-radius: 20px;
+  border: 1px solid var(--line);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.96));
+}
+
+.payloadReportHeader {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.payloadResultGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.payloadResultGridSingle {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.payloadResultCard {
+  position: relative;
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 16px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid var(--line);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.05);
+  overflow: hidden;
+  transition:
+    transform 0.18s ease,
+    border-color 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.payloadResultCard::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  background: #94a3b8;
+}
+
+.payloadResultCard.confirmed::before {
+  background: #ef4444;
+}
+
+.payloadResultCard.suspected::before {
+  background: #f59e0b;
+}
+
+.payloadResultCard.notTriggered::before {
+  background: #64748b;
+}
+
+.payloadResultCard:hover {
+  transform: translateY(-2px);
+  border-color: rgba(37, 99, 235, 0.28);
+  box-shadow: 0 18px 34px rgba(15, 23, 42, 0.09);
+}
+
+.payloadResultCard.compact {
+  padding: 14px;
+}
+
+.payloadResultHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.payloadResultKicker {
+  color: var(--text-faint);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.4;
+}
+
+.payloadResultTitle {
+  margin-top: 4px;
+  color: var(--text-main);
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.payloadStatusBadge {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: rgba(100, 116, 139, 0.12);
+  color: #475569;
+  font-size: 12px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.payloadStatusBadge.confirmed {
+  background: rgba(239, 68, 68, 0.11);
+  color: #b91c1c;
+}
+
+.payloadStatusBadge.suspected {
+  background: rgba(245, 158, 11, 0.14);
+  color: #92400e;
+}
+
+.payloadStatusBadge.notTriggered {
+  background: rgba(100, 116, 139, 0.12);
+  color: #475569;
+}
+
+.payloadCodeBlock {
+  padding: 12px 13px;
+  border-radius: 14px;
+  background: #0f172a;
+  color: #dbeafe;
+  font-size: 12px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  border: 1px solid rgba(15, 23, 42, 0.18);
+}
+
+.payloadEvidenceGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.payloadEvidenceGrid > div {
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(248, 250, 252, 0.96);
+  border: 1px solid var(--line);
+}
+
+.payloadEvidenceGrid span {
+  display: block;
+  color: var(--text-faint);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.4;
+}
+
+.payloadEvidenceGrid strong {
+  display: block;
+  margin-top: 4px;
+  color: var(--text-main);
+  font-size: 12px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.payloadSnippet {
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(37, 99, 235, 0.06);
+  color: var(--text-soft);
+  font-size: 12px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.payloadActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.payloadActions .topActionBtn,
+.payloadActions .workbenchInlineDangerBtn {
+  min-height: 34px;
+}
+
+.compactCode {
+  max-height: 160px;
+  overflow: auto;
 }
 
 .workbenchFindingTitle,
@@ -2702,8 +2938,19 @@ body {
   .workbenchCluster,
   .workbenchInfoGrid,
   .workbenchSelectorGrid,
-  .workbenchCompareGrid {
+  .workbenchCompareGrid,
+  .payloadResultGrid,
+  .payloadEvidenceGrid {
     grid-template-columns: 1fr;
+  }
+
+  .workbenchSectionHeader {
+    flex-direction: column;
+  }
+
+  .workbenchMiniStats {
+    justify-content: flex-start;
+    min-width: 0;
   }
 
   .workbenchReportHeader {
@@ -2751,5 +2998,13 @@ body {
 
   .helpHeroTitle {
     font-size: 28px;
+  }
+
+  .payloadResultHeader {
+    flex-direction: column;
+  }
+
+  .payloadStatusBadge {
+    align-self: flex-start;
   }
 }

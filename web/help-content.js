@@ -18,6 +18,7 @@ export const HELP_SECTIONS = [
         ],
         tags: ['XSS', '基础概念', '漏洞原理'],
         resources: [
+          { label: 'OWASP 中文：跨站脚本预防速查表', href: 'https://cheatsheetseries.owasp.ac.cn/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html' },
           { label: 'OWASP: Cross Site Scripting (XSS)', href: 'https://owasp.org/www-community/attacks/xss/' },
           { label: 'PortSwigger: What is XSS?', href: 'https://portswigger.net/web-security/cross-site-scripting' }
         ]
@@ -37,6 +38,7 @@ export const HELP_SECTIONS = [
         ],
         tags: ['DOM XSS', 'Source', 'Sink'],
         resources: [
+          { label: 'OWASP 中文：基于 DOM 的 XSS 预防', href: 'https://cheatsheetseries.owasp.ac.cn/cheatsheets/DOM_based_XSS_Prevention_Cheat_Sheet.html' },
           { label: 'OWASP: DOM Based XSS', href: 'https://owasp.org/www-community/attacks/DOM_Based_XSS' },
           { label: 'OWASP: DOM based XSS Prevention Cheat Sheet', href: 'https://cheatsheetseries.owasp.org/cheatsheets/DOM_based_XSS_Prevention_Cheat_Sheet.html' }
         ]
@@ -97,6 +99,7 @@ export const HELP_SECTIONS = [
         ],
         tags: ['上下文', '输出位置', '解释方式'],
         resources: [
+          { label: 'MDN 中文：element.innerHTML', href: 'https://developer.mozilla.org/zh-CN/docs/Web/API/Element/innerHTML' },
           { label: 'OWASP XSS Prevention Cheat Sheet', href: 'https://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html' }
         ]
       },
@@ -589,6 +592,7 @@ export const HELP_SECTIONS = [
         ],
         tags: ['修复', '输出安全', '防护思路'],
         resources: [
+          { label: 'OWASP 中文：跨站脚本预防速查表', href: 'https://cheatsheetseries.owasp.ac.cn/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html' },
           { label: 'OWASP XSS Prevention Cheat Sheet', href: 'https://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html' }
         ]
       },
@@ -609,8 +613,9 @@ export const HELP_SECTIONS = [
         ],
         tags: ['前端修复', '安全替代'],
         resources: [
-          { label: 'MDN: Node.textContent', href: 'https://developer.mozilla.org/en-US/docs/Web/API/Node/textContent' },
-          { label: 'MDN: EventTarget.addEventListener', href: 'https://developer.mozilla.org/en-US/docs/Web/API/EventTarget/addEventListener' }
+          { label: 'MDN 中文：Node.textContent', href: 'https://developer.mozilla.org/zh-CN/docs/Web/API/Node/textContent' },
+          { label: 'MDN 中文：EventTarget.addEventListener', href: 'https://developer.mozilla.org/zh-CN/docs/Web/API/EventTarget/addEventListener' },
+          { label: 'MDN 中文：element.innerHTML', href: 'https://developer.mozilla.org/zh-CN/docs/Web/API/Element/innerHTML' }
         ]
       },
       {
@@ -628,7 +633,171 @@ export const HELP_SECTIONS = [
         ],
         tags: ['CSP', '防护'],
         resources: [
-          { label: 'MDN: Content Security Policy', href: 'https://developer.mozilla.org/en-US/docs/Web/HTTP/CSP' }
+          { label: 'MDN 中文：内容安全策略 CSP', href: 'https://developer.mozilla.org/zh-CN/docs/Web/HTTP/Guides/CSP' },
+          { label: 'OWASP 中文：内容安全策略速查表', href: 'https://cheatsheetseries.owasp.ac.cn/cheatsheets/Content_Security_Policy_Cheat_Sheet.html' }
+        ]
+      }
+    ]
+  },
+  {
+    key: 'external-cn',
+    label: '中文外部资料',
+    items: [
+      {
+        id: 'cn_links_xss_prevention',
+        q: '想系统学习 XSS 修复，应该按什么顺序学？',
+        a: '优先看防护原则和上下文编码资料，再看具体案例，不要一开始就只背 payload 列表。',
+        details: [
+          'XSS 修复的核心不是记住某几个过滤规则，而是理解输出上下文、危险 DOM API、编码位置和浏览器解释规则。',
+          '如果你要把本系统的扫描结果写进论文或答辩材料，建议先阅读 OWASP 的 XSS 预防速查表，再结合 MDN 的 DOM API 文档解释具体代码改法。',
+          '这些资料适合作为“为什么这样修”的依据：它们强调上下文敏感输出、避免危险 sink、使用文本化 DOM API、CSP 作为补充防线。',
+          '非官方中文教程可以帮助你快速建立直觉，但具体修复结论仍应回到 OWASP、MDN 和项目实际代码。'
+        ],
+        bullets: [
+          '先看 OWASP XSS 预防速查表，建立修复原则。',
+          '再看 MDN 的 innerHTML、textContent、addEventListener，落到具体前端代码。',
+          '最后看 CSP 资料，把它作为纵深防御补充。'
+        ],
+        tags: ['中文资料', 'XSS 修复', '学习路线'],
+        resources: [
+          { label: 'OWASP 中文：跨站脚本预防速查表', href: 'https://cheatsheetseries.owasp.ac.cn/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html' },
+          { label: 'MDN 中文：element.innerHTML', href: 'https://developer.mozilla.org/zh-CN/docs/Web/API/Element/innerHTML' },
+          { label: 'MDN 中文：Node.textContent', href: 'https://developer.mozilla.org/zh-CN/docs/Web/API/Node/textContent' },
+          { label: 'MDN 中文：内容安全策略 CSP', href: 'https://developer.mozilla.org/zh-CN/docs/Web/HTTP/Guides/CSP' },
+          { label: '非官方中文学习：XSS 从入门到精通（博客园）', href: 'https://www.cnblogs.com/L-xy/p/19085240' },
+          { label: '非官方中文学习：XSS 跨站脚本攻击漏洞（博客园）', href: 'https://www.cnblogs.com/wuhongbin/p/15583717.html' }
+        ]
+      },
+      {
+        id: 'cn_links_dom_xss',
+        q: 'DOM XSS 和 source/sink 分析可以参考哪些中文资料？',
+        a: 'DOM XSS 更关注浏览器端 JavaScript 数据流，阅读时要把 source、传播路径和 sink 连起来看。',
+        details: [
+          'DOM XSS 的重点不只是页面有没有回显，而是前端脚本是否把 location、hash、storage、postMessage 等来源的数据写入 innerHTML、document.write、eval 等危险位置。',
+          '本系统里的 source、sink、AST 数据流、页面输入面画像，都可以和 OWASP DOM XSS 预防速查表中的规则对应起来理解。',
+          '如果帮助页里的“回显上下文”显示为 HTML 文本、属性或脚本片段，也应该回到 DOM 资料里确认该上下文对应的安全写法。',
+          '非官方 DOM XSS 文章往往会列出更多 source 和 sink，适合扩展规则库思路；但实际判断仍要看当前页面是否真的存在可控输入到危险 sink 的链路。'
+        ],
+        bullets: [
+          'source 是数据入口，sink 是危险输出或执行位置。',
+          'DOM XSS 常常需要结合源码和运行时行为一起判断。',
+          '看到 innerHTML、document.write、eval、事件属性时，优先检查是否有不可信数据流入。'
+        ],
+        tags: ['中文资料', 'DOM XSS', 'Source', 'Sink'],
+        resources: [
+          { label: 'OWASP 中文：基于 DOM 的 XSS 预防', href: 'https://cheatsheetseries.owasp.ac.cn/cheatsheets/DOM_based_XSS_Prevention_Cheat_Sheet.html' },
+          { label: 'MDN 中文：Document Object Model', href: 'https://developer.mozilla.org/zh-CN/docs/Web/API/Document_Object_Model' },
+          { label: 'MDN 中文：Document.write', href: 'https://developer.mozilla.org/zh-CN/docs/Web/API/Document/write' },
+          { label: '非官方中文学习：HackTricks DOM XSS 中文', href: 'https://book.hacktricks.wiki/zh/pentesting-web/xss-cross-site-scripting/dom-xss.html' },
+          { label: '非官方中文学习：DOM XSS 完整指南（博客园译文）', href: 'https://www.cnblogs.com/sec875/p/19324289' }
+        ]
+      },
+      {
+        id: 'cn_links_payload_learning',
+        q: '学习 payload 时应该避免哪些误区？',
+        a: 'payload 是验证工具，不是漏洞本身；只背 payload 很容易误判，也很难解释结果。',
+        details: [
+          '同一个 payload 在 HTML 文本、属性值、脚本字符串、URL 协议、DOM API 参数里含义完全不同，所以学习 payload 必须和上下文一起学。',
+          '本系统把 payload 结果拆成向量、参数、目标 URL、回显状态、上下文提示和证据片段，就是为了避免只看到一串 payload 却不知道它为什么有效。',
+          '学习非官方 payload 文章时，建议重点看“它试图闭合什么边界、进入什么上下文、触发什么 sink”，而不是只复制字符串。',
+          '如果某个 payload 没命中，也不能直接得出安全结论；可能只是上下文不匹配、输入点不同、页面状态不同或需要浏览器执行。'
+        ],
+        bullets: [
+          '先问：这个 payload 面向哪个上下文？',
+          '再问：它验证的是 query、form、hash 还是 DOM source？',
+          '最后看：结果里有没有证据支持它真的进入了危险位置？'
+        ],
+        tags: ['中文资料', 'Payload', '学习误区', '上下文'],
+        resources: [
+          { label: 'PortSwigger：XSS Cheat Sheet', href: 'https://portswigger.net/web-security/cross-site-scripting/cheat-sheet' },
+          { label: '非官方中文学习：常见十大漏洞之 XSS 详解（博客园）', href: 'https://www.cnblogs.com/lukeya/p/14286790.html' },
+          { label: '非官方中文学习：Kali Web 渗透测试 SQL 注入与 XSS', href: 'https://kali.wiki/docs/kali/sqli-xss/' }
+        ]
+      },
+      {
+        id: 'cn_links_code_audit',
+        q: '从代码审计角度看 XSS，应该重点看哪些位置？',
+        a: '代码审计时要沿着数据流看：输入从哪里来，经过什么处理，最后写到了哪里。',
+        details: [
+          '服务端模板重点看变量是否进入 HTML、属性、script、style、URL 等不同输出上下文，以及框架是否默认转义。',
+          '前端代码重点看 location、hash、storage、接口返回、postMessage、表单值是否进入 innerHTML、outerHTML、insertAdjacentHTML、document.write、eval、setTimeout 字符串等 sink。',
+          '如果项目使用 Vue、React 等框架，也不能只看框架名就认为安全；仍要检查 v-html、dangerouslySetInnerHTML、手写 DOM 操作、第三方富文本渲染等逃逸口。',
+          '本系统的静态发现和页面工作台适合辅助定位这些位置，但最终仍要回到源码确认数据流和上下文。'
+        ],
+        bullets: [
+          '审 source：URL、表单、Cookie、Storage、postMessage、接口返回。',
+          '审 sink：innerHTML、document.write、eval、事件属性、危险 URL 协议。',
+          '审处理过程：有没有正确编码、净化、协议校验和上下文隔离。'
+        ],
+        tags: ['中文资料', '代码审计', 'Source', 'Sink', '前端安全'],
+        resources: [
+          { label: '非官方中文学习：DOM XSS 半自动化（博客园）', href: 'https://www.cnblogs.com/piaomiaohongchen/p/16921374.html' },
+          { label: '非官方中文学习：XSSStrike 源码分析（CSDN）', href: 'https://blog.csdn.net/2201_75445650/article/details/148352555' },
+          { label: 'OWASP 中文：基于 DOM 的 XSS 预防', href: 'https://cheatsheetseries.owasp.ac.cn/cheatsheets/DOM_based_XSS_Prevention_Cheat_Sheet.html' }
+        ]
+      },
+      {
+        id: 'cn_links_csp_and_headers',
+        q: 'CSP 和安全响应头应该怎么看？',
+        a: 'CSP 是补强措施，适合降低脚本执行面，但不能替代代码层的上下文安全输出。',
+        details: [
+          'CSP 的价值在于限制脚本来源、内联脚本、eval 等执行面，能够削弱部分 XSS 攻击路径。',
+          '但如果页面仍然把不可信输入拼进危险位置，CSP 只能降低风险，不能证明代码本身已经安全。',
+          '在论文或报告中描述 CSP 时，建议明确它属于纵深防御：先修 DOM 和输出上下文，再用 CSP、HttpOnly、SameSite 等安全头减少利用面。'
+        ],
+        bullets: [
+          'CSP 优先关注 script-src、default-src、object-src、base-uri 等指令。',
+          '开发阶段可以先用 Report-Only 观察违规，再逐步收紧策略。',
+          '不要把允许 unsafe-inline 当成长期方案。'
+        ],
+        tags: ['中文资料', 'CSP', '安全响应头', '纵深防御'],
+        resources: [
+          { label: 'MDN 中文：内容安全策略 CSP', href: 'https://developer.mozilla.org/zh-CN/docs/Web/HTTP/Guides/CSP' },
+          { label: 'OWASP 中文：内容安全策略速查表', href: 'https://cheatsheetseries.owasp.ac.cn/cheatsheets/Content_Security_Policy_Cheat_Sheet.html' },
+          { label: 'OWASP 中国：2024 十大主动安全控制', href: 'https://www.owasp.org.cn/OWASP-CHINA/owasp-project/owasp-proactive-controls4e2d6587987976ee/2024OWASP%E5%8D%81%E5%A4%A7%E4%B8%BB%E5%8A%A8%E5%AE%89%E5%85%A8%E6%8E%A7%E5%88%B6-%E5%8F%91%E5%B8%83%E7%89%88.pdf' }
+        ]
+      },
+      {
+        id: 'cn_links_top10_context',
+        q: 'OWASP Top 10 和本系统的 XSS 检测有什么关系？',
+        a: 'Top 10 是风险分类框架，本系统更聚焦其中与注入、软件和数据完整性、配置缺陷相关的 XSS 检测与验证。',
+        details: [
+          'XSS 在不同版本和分类里可能被归入注入、客户端脚本风险或更大的应用安全风险类别中；它不是 Top 10 的全部，但一直是 Web 安全中非常典型的问题。',
+          '本系统的价值是把 Top 10 这类宏观风险拆到页面、输入向量、payload、证据和修复建议这些可操作对象上。',
+          '写论文时可以把 OWASP Top 10 作为研究背景，把本系统的规则扫描、动态验证和报告展示作为具体实现。'
+        ],
+        bullets: [
+          'Top 10 适合写背景和风险分类。',
+          '本系统适合展示具体检测、验证和解释流程。',
+          '报告里的最终判断仍然要结合具体页面证据。'
+        ],
+        tags: ['中文资料', 'OWASP Top 10', '论文背景'],
+        resources: [
+          { label: 'OWASP 中国：Top 10 2021 中文版 PDF', href: 'https://www.owasp.org.cn/OWASP-CHINA/owasp-project/OWASP-TOP10-2021%E4%B8%AD%E6%96%87%E7%89%88V1.0%E5%8F%91%E5%B8%83.pdf' },
+          { label: 'OWASP Top 10 2021 繁体中文页面', href: 'https://owasp.org/Top10/2021/zh-Hant/' },
+          { label: 'OWASP Cheat Sheet Series', href: 'https://cheatsheetseries.owasp.org/' }
+        ]
+      },
+      {
+        id: 'cn_links_thesis_material',
+        q: '写论文或答辩时，这些外部资料应该怎么引用和组织？',
+        a: '建议把官方资料用于定义和原则，把非官方中文资料用于辅助理解和案例说明。',
+        details: [
+          '论文背景部分可以引用 OWASP Top 10、OWASP Cheat Sheet、MDN 文档来说明 XSS 的风险、浏览器解释机制和防护原则。',
+          '系统设计部分可以结合本项目的爬取、静态分析、动态验证、AI 多轮验证、页面工作台和报告导出，说明你如何把通用安全原则落到工具实现里。',
+          '非官方中文文章适合帮助你理解案例和补充表述，但不建议作为唯一权威依据；如果和 OWASP/MDN 的原则不一致，应优先相信官方资料。',
+          '答辩展示时可以按“概念 -> 检测流程 -> payload 验证 -> 证据解释 -> 修复建议 -> 外部依据”的顺序组织，这样逻辑更完整。'
+        ],
+        bullets: [
+          '官方资料用于定义、原则和规范依据。',
+          '非官方资料用于辅助学习、案例和扩展阅读。',
+          '系统截图和报告结果用于证明实现效果。'
+        ],
+        tags: ['中文资料', '论文', '答辩', '资料组织'],
+        resources: [
+          { label: 'OWASP 中国：Top 10 2021 中文版 PDF', href: 'https://www.owasp.org.cn/OWASP-CHINA/owasp-project/OWASP-TOP10-2021%E4%B8%AD%E6%96%87%E7%89%88V1.0%E5%8F%91%E5%B8%83.pdf' },
+          { label: 'OWASP 中文：跨站脚本预防速查表', href: 'https://cheatsheetseries.owasp.ac.cn/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html' },
+          { label: '非官方中文学习：深入解析 XSS 漏洞（博客园）', href: 'https://www.cnblogs.com/yangykaifa/p/19436639' }
         ]
       }
     ]
@@ -878,6 +1047,24 @@ export const HELP_SECTIONS = [
           '静态证据强时，仍要继续看源码和页面行为'
         ],
         tags: ['FAQ', '动态验证', '复核'],
+        resources: []
+      },
+      {
+        id: 'faq_ai_payload_generation',
+        q: 'AI 生成 Payload 和系统内置 Payload 有什么区别？',
+        a: '系统内置 Payload 是固定预设的通用探针和利用串，AI 生成 Payload 则会结合当前页面的具体漏洞上下文来定制。',
+        details: [
+          '内置 payload 覆盖的是最常见的几类场景，例如标签注入、属性逃逸、字符串闭合等，但它们不会考虑某个具体页面的数据流路径、sink 类型或回显位置。',
+          'AI 生成 Payload 会读取当前页面的静态分析结果（如 AST 数据流中的 source、sink、flow_display），并结合页面 HTML 片段和回显上下文来设计更有针对性的 payload。',
+          '例如，如果分析发现 location.search 的值最终流入 innerHTML，AI 可能会生成更贴合该路径的 payload，而不是简单复用通用标签注入。',
+          'AI 生成 Payload 提供两种模式：安全探针模式只生成非执行标记，适合第一轮确认链路；利用验证模式生成真实 XSS payload，适合深入验证。'
+        ],
+        bullets: [
+          '内置 payload 是通用覆盖，AI payload 是上下文定制。',
+          'AI payload 更贴合具体数据流，但不一定每次都比通用 payload 更有效。',
+          '探针模式适合安全优先的验证，利用模式适合深度验证。'
+        ],
+        tags: ['FAQ', 'AI Payload', '生成', '上下文'],
         resources: []
       }
     ]

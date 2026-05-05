@@ -8,7 +8,7 @@ import sys
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
-from urllib.parse import parse_qsl, urlencode, urlsplit
+from urllib.parse import parse_qsl, unquote, urlencode, urlsplit
 
 if __package__ in {None, ""}:
     PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -24,14 +24,14 @@ from sqlalchemy import func
 from server.db import db
 from server.auth import extract_bearer_token, hash_password, issue_token, serialize_user, verify_password
 from server.dynamic_verify import (
-    build_safe_probe_candidates_for_page_v2,
+    build_safe_probe_candidates_for_page,
     retest_finding,
     retest_page,
-    run_ai_multi_round_validation_v2,
+    run_ai_multi_round_validation,
     suggest_payloads_for_finding,
     suggest_payloads_for_page,
 )
-from server.models import AIReport, DynamicVerification, Finding, FindingStatus, Job, Log, Page, User
+from server.models import AIReport, AIPayloadReport, DynamicVerification, Finding, FindingStatus, Job, Log, Page, User
 from server.report_export import build_export_filename, render_report_html, render_report_json
 from server.runner import bus, runner
 
@@ -776,7 +776,7 @@ def get_page_workbench(job_id: str) -> Response:
         if _parse_dynamic_evidence(item.evidence).get("source") not in {"manual_retest", "ai_multi_round"}
     ]
     manual_retest_reports = _build_manual_retest_reports(manual_retests)
-    ai_multi_round_reports = _build_runtime_reports_v2(ai_multi_round_retests, source="ai_multi_round")
+    ai_multi_round_reports = _build_runtime_reports(ai_multi_round_retests, source="ai_multi_round")
     serialized_page_verifications = [_serialize_verification(item) for item in verifications]
     serialized_manual_retests: list[dict[str, object]] = []
     serialized_dynamic_results: list[dict[str, object]] = []
@@ -810,6 +810,7 @@ def get_page_workbench(job_id: str) -> Response:
             "manual_retest_reports": manual_retest_reports[:20],
             "latest_ai_multi_round_report": ai_multi_round_reports[0] if ai_multi_round_reports else None,
             "ai_multi_round_reports": ai_multi_round_reports[:10],
+            "ai_payload_reports": _serialize_ai_payload_reports(job_id, page.url),
             "dynamic_results": serialized_dynamic_results,
             "successful_payloads": _build_successful_payloads(serialized_page_verifications),
             "payloads": suggest_payloads_for_page(page, findings),
@@ -848,12 +849,12 @@ def ai_validate_page_workbench(job_id: str) -> Response:
         "risk_summary": _build_page_risk_summary(findings, [], input_profile),
         "related_findings": _serialize_workbench_findings(findings)[:6],
     }
-    candidates = build_safe_probe_candidates_for_page_v2(page, findings, mode)
+    candidates = build_safe_probe_candidates_for_page(page, findings, mode)
     ai_plan = _recommend_ai_multi_round_plan(page_context, candidates, mode)
     batch_id = uuid4().hex
 
     try:
-        round_outputs = run_ai_multi_round_validation_v2(job_id, page, ai_plan["rounds"], use_selenium=use_selenium)
+        round_outputs = run_ai_multi_round_validation(job_id, page, ai_plan["rounds"], use_selenium=use_selenium)
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
     except Exception as exc:
@@ -886,7 +887,7 @@ def ai_validate_page_workbench(job_id: str) -> Response:
         )
     db.session.commit()
 
-    reports = _build_runtime_reports_v2(
+    reports = _build_runtime_reports(
         DynamicVerification.query.filter_by(job_id=job_id, page_url=page.url).order_by(DynamicVerification.id.desc()).all(),
         source="ai_multi_round",
     )
@@ -1014,6 +1015,135 @@ def explain_page_workbench(job_id: str) -> Response:
             "explanation": result["explanation"],
         }
     )
+
+
+def _serialize_ai_payload_reports(job_id: str, page_url: str) -> list[dict[str, object]]:
+    reports = (
+        AIPayloadReport.query
+        .filter_by(job_id=job_id, page_url=page_url)
+        .order_by(AIPayloadReport.id.desc())
+        .limit(10)
+        .all()
+    )
+    result: list[dict[str, object]] = []
+    for r in reports:
+        try:
+            payloads = json.loads(r.payloads_json)
+        except (json.JSONDecodeError, TypeError):
+            payloads = []
+        result.append({
+            "id": r.id,
+            "mode": r.mode,
+            "finding_kind": r.finding_kind,
+            "finding_title": r.finding_title,
+            "payloads": payloads,
+            "created_at": _to_beijing_iso(r.created_at),
+        })
+    return result
+
+
+@api_bp.post("/jobs/<job_id>/pages/ai-generate-payload")
+def ai_generate_payload_page(job_id: str) -> Response:
+    job: Job | None = db.session.get(Job, job_id)
+    if job is None:
+        return jsonify({"error": "not found"}), 404
+
+    payload = request.get_json(force=True, silent=True) or {}
+    page_url = str(payload.get("url") or "").strip()
+    finding_kind = str(payload.get("finding_kind") or "").strip()
+    finding_title = str(payload.get("finding_title") or "").strip()
+    mode = str(payload.get("mode") or "exploit").strip().lower()
+
+    if mode not in {"probe", "exploit"}:
+        return jsonify({"error": "invalid mode"}), 400
+    if not page_url:
+        return jsonify({"error": "url required"}), 400
+
+    page = Page.query.filter_by(job_id=job_id, url=page_url).order_by(Page.id.desc()).first()
+    if page is None:
+        return jsonify({"error": "page not found"}), 404
+
+    findings = Finding.query.filter_by(job_id=job_id, url=page.url).order_by(Finding.id.asc()).all()
+
+    target_finding = None
+    if finding_kind and finding_title:
+        target_finding = next(
+            (f for f in findings if f.kind == finding_kind and f.title == finding_title),
+            None,
+        )
+    if target_finding is None and findings:
+        target_finding = max(findings, key=lambda f: _severity_score(f.severity))
+
+    if target_finding is None:
+        return jsonify({"error": "no finding available for payload generation"}), 400
+
+    evidence = _parse_evidence(target_finding.evidence)
+    finding_context: dict[str, object] = {
+        "kind": target_finding.kind,
+        "title": target_finding.title,
+        "severity": target_finding.severity,
+        "evidence": {
+            "source": evidence.get("source"),
+            "sink": evidence.get("sink"),
+            "path": evidence.get("path"),
+            "flow_display": evidence.get("flow_display"),
+            "snippet": str(evidence.get("snippet") or "")[:500],
+            "label": evidence.get("label"),
+            "line": evidence.get("line"),
+        },
+    }
+
+    verifications = DynamicVerification.query.filter_by(
+        job_id=job_id, page_url=page.url,
+    ).order_by(DynamicVerification.id.desc()).limit(5).all()
+    for v in verifications:
+        detail = _parse_dynamic_evidence(v.evidence)
+        if detail.get("reflection_context"):
+            finding_context["reflection_context"] = detail["reflection_context"]
+            finding_context["context_hint"] = detail.get("context_hint")
+            break
+
+    analyzer = get_analyzer()
+    result = analyzer.generate_payloads(finding_context, page.content or "", mode)
+    if not result.get("success"):
+        db.session.add(Log(job_id=job_id, message=f"[AI生成Payload] 失败：{page.url} - {result.get('error')}"))
+        db.session.commit()
+        return jsonify({"error": str(result.get("error") or "AI payload generation failed")}), 500
+
+    ai_content = result["payloads"]["content"]
+    try:
+        parsed = json.loads(ai_content)
+        generated = parsed.get("payloads") or []
+    except (json.JSONDecodeError, TypeError):
+        generated = [{"payload": ai_content, "vector": "", "context": "", "reason": "AI 原始输出"}]
+
+    for item in generated:
+        item["payload"] = unquote(str(item.get("payload") or ""))
+
+    report = AIPayloadReport(
+        job_id=job_id,
+        page_url=page.url,
+        finding_kind=target_finding.kind,
+        finding_title=target_finding.title,
+        mode=mode,
+        payloads_json=json.dumps(generated, ensure_ascii=False),
+    )
+    db.session.add(report)
+    db.session.add(Log(job_id=job_id, message=f"[AI生成Payload] 成功：{page.url} / 模式：{mode} / 生成 {len(generated)} 个 payload"))
+    db.session.commit()
+
+    return jsonify({
+        "ok": True,
+        "report_id": report.id,
+        "mode": mode,
+        "page_url": page.url,
+        "finding": {
+            "kind": target_finding.kind,
+            "title": target_finding.title,
+            "severity": target_finding.severity,
+        },
+        "payloads": generated,
+    })
 
 
 @api_bp.get("/jobs/<job_id>/ai-report")
@@ -1159,7 +1289,7 @@ def _build_export_detail_payload(
         ]
         page_manual_reports = [_decorate_runtime_report(item) for item in _build_manual_retest_reports(manual_retests)]
         page_ai_reports = [
-            _decorate_runtime_report(item) for item in _build_runtime_reports_v2(ai_multi_round, source="ai_multi_round")
+            _decorate_runtime_report(item) for item in _build_runtime_reports(ai_multi_round, source="ai_multi_round")
         ]
         manual_retest_reports.extend(page_manual_reports)
         ai_multi_round_reports.extend(page_ai_reports)
@@ -1250,6 +1380,18 @@ def _finding_family(kind: str, title: str, payload: dict[str, object]) -> tuple[
     if kind in {"javascript_protocol", "data_protocol", "iframe_srcdoc"}:
         return ("executable_attribute", "可执行属性注入风险")
 
+    if kind in {"tainted_source", "source_sink_flow", "ast_data_flow"}:
+        source = str(payload.get("source") or "")
+        if source:
+            return ("data_flow_source", f"数据流风险：{source}")
+        return ("data_flow_source", "数据流风险")
+
+    if kind == "dom_sink":
+        sink = str(payload.get("sink") or payload.get("label") or "")
+        if sink:
+            return ("dom_sink_group", f"DOM Sink：{sink}")
+        return ("dom_sink_group", "DOM Sink 风险")
+
     return (kind, title)
 
 
@@ -1260,6 +1402,20 @@ def _explain_finding(kind: str, severity: str) -> tuple[str, str, str, str]:
             "high",
             "建议把跳转逻辑移到 addEventListener 或受控函数中，避免在 HTML 属性里直接操作 location。",
             "html_attr",
+        )
+    if kind == "data_flow_source":
+        return (
+            "页面中识别到用户可控输入沿数据流路径到达危险 Sink，存在明确的 DOM XSS 风险。",
+            "high",
+            "优先检查变量传播链上的赋值和拼接逻辑，确认是否需要改为安全输出或增加中间清洗。",
+            "flow",
+        )
+    if kind == "dom_sink_group":
+        return (
+            "页面使用了可直接执行或拼接 HTML 的危险 Sink，若输入可控则可能触发脚本执行。",
+            "high" if severity == "high" else "medium",
+            "优先改用 textContent、setAttribute 等安全写法，避免把未经处理的内容写入 HTML。",
+            "script_snippet",
         )
     if kind == "source_sink_flow":
         return (
@@ -1372,7 +1528,11 @@ def _build_grouped_findings(
     grouped: list[dict[str, object]] = []
     for group in groups.values():
         reason, confidence, recommendation, evidence_type = _explain_finding(group["kind"], group["severity"])
-        instances = sorted(group["instances"], key=lambda item: (item.get("line") or 0, item.get("snippet") or ""))
+        _kind_priority = {"ast_data_flow": 0, "source_sink_flow": 1, "tainted_source": 2, "dom_sink": 3}
+        instances = sorted(
+            group["instances"],
+            key=lambda item: (_kind_priority.get(str(item.get("kind", "")), 9), item.get("line") or 0),
+        )
         urls = sorted(group["urls"])
         lines = [str(item["line"]) for item in instances if item.get("line")]
         summary = f"共命中 {len(instances)} 处，涉及 {len(urls)} 个页面"
@@ -1392,7 +1552,7 @@ def _build_grouped_findings(
                 "severity_label": _severity_label(str(group["severity"])),
                 "title": group["title"],
                 "summary": summary,
-                "evidence": instances[0].get("snippet") or "",
+                "evidence": unquote(instances[0].get("snippet") or ""),
                 "instances": instances,
                 "instance_count": len(instances),
                 "reason": reason,
@@ -1876,10 +2036,27 @@ def _build_page_repair_suggestions(findings: list[Finding], input_profile: dict[
 
 def _serialize_workbench_findings(findings: list[Finding]) -> list[dict[str, object]]:
     deduped: dict[tuple[str, str], Finding] = {}
+    _flow_kinds = {"tainted_source", "source_sink_flow", "ast_data_flow"}
+    _flow_priority = {"ast_data_flow": 0, "source_sink_flow": 1, "tainted_source": 2}
     for item in findings:
-        key = (item.kind, item.title)
+        if item.kind in _flow_kinds:
+            ev = _parse_evidence(item.evidence)
+            source = str(ev.get("source") or "")
+            key = ("data_flow_source", source)
+        elif item.kind == "dom_sink":
+            ev = _parse_evidence(item.evidence)
+            sink = str(ev.get("sink") or ev.get("label") or "")
+            key = ("dom_sink_group", sink)
+        else:
+            key = (item.kind, item.title)
+
         current = deduped.get(key)
-        if current is None or _severity_score(item.severity) > _severity_score(current.severity):
+        if current is None:
+            deduped[key] = item
+        elif item.kind in _flow_kinds and current.kind in _flow_kinds:
+            if _flow_priority.get(item.kind, 9) < _flow_priority.get(current.kind, 9):
+                deduped[key] = item
+        elif _severity_score(item.severity) > _severity_score(current.severity):
             deduped[key] = item
 
     ordered = sorted(
@@ -1898,7 +2075,7 @@ def _serialize_workbench_findings(findings: list[Finding]) -> list[dict[str, obj
                 "severity": item.severity,
                 "severity_label": _severity_label(item.severity),
                 "title": item.title,
-                "evidence": str(payload.get("snippet") or item.evidence)[:220],
+                "evidence": unquote(str(payload.get("snippet") or item.evidence))[:220],
                 "created_at": _to_beijing_iso(item.created_at),
             }
         )
@@ -2145,6 +2322,8 @@ def _dynamic_level_label(level: str) -> str:
 def _finding_kind_zh(kind: str) -> str:
     return {
         "inline_event_navigation": "内联事件跳转风险",
+        "data_flow_source": "数据流风险",
+        "dom_sink_group": "DOM Sink 风险",
         "inline_event_handler": "内联事件处理器风险",
         "executable_attribute": "可执行属性注入风险",
         "javascript_protocol": "JavaScript 协议执行风险",
@@ -2237,7 +2416,7 @@ def _parse_dynamic_evidence(raw: str | None) -> dict[str, str | None]:
 
 
 def _build_manual_retest_reports(verifications: list[DynamicVerification]) -> list[dict[str, object]]:
-    return _build_runtime_reports_v2(verifications, source="manual_retest")
+    return _build_runtime_reports(verifications, source="manual_retest")
 
 
 def _build_runtime_reports(verifications: list[DynamicVerification], source: str) -> list[dict[str, object]]:
@@ -2275,93 +2454,8 @@ def _build_runtime_reports(verifications: list[DynamicVerification], source: str
             ),
         )
         statuses = Counter(str(item.get("level") or "") for item in results)
-        rounds_map: dict[int, dict[str, object]] = {}
-        for item in results:
-            round_index = int(item.get("round_index") or 0)
-            bucket_round = rounds_map.setdefault(
-                round_index,
-                {
-                    "round_index": round_index,
-                    "round_label": item.get("round_label") or (f"第 {round_index} 轮" if round_index else "未命名轮次"),
-                    "vector": item.get("vector"),
-                    "payload": item.get("payload"),
-                    "candidate_id": item.get("candidate_id"),
-                    "round_reason": item.get("round_reason"),
-                    "result_count": 0,
-                    "confirmed_count": 0,
-                },
-            )
-            bucket_round["result_count"] += 1
-            if item.get("level") == "confirmed":
-                bucket_round["confirmed_count"] += 1
-        verdict = _summarize_runtime_report(statuses, results, source)
-        reports.append(
-            {
-                "batch_id": bucket["batch_id"],
-                "created_at": bucket["created_at"],
-                "created_at_ts": bucket["created_at_ts"],
-                "reason": bucket["reason"],
-                "preferred_vector": bucket["preferred_vector"],
-                "preferred_payload": bucket["preferred_payload"],
-                "mode": bucket["mode"],
-                "plan_provider": bucket["plan_provider"],
-                "result_count": len(results),
-                "verified_count": sum(1 for item in results if item.get("level") == "confirmed"),
-                "rounds": sorted(rounds_map.values(), key=lambda item: int(item["round_index"])),
-                "vectors": sorted({str(item.get("vector") or "") for item in results if item.get("vector")}),
-                "status_summary": {
-                    "confirmed": statuses.get("confirmed", 0),
-                    "suspected": statuses.get("suspected", 0),
-                    "not_triggered": statuses.get("not_triggered", 0),
-                    "error": statuses.get("error", 0),
-                },
-                "final_assessment": verdict["value"],
-                "final_assessment_label": verdict["label"],
-                "final_assessment_reason": verdict["reason"],
-                "results": results,
-            }
-        )
-
-    return sorted(reports, key=lambda current: int(current["created_at_ts"]), reverse=True)
-
-
-def _build_runtime_reports_v2(verifications: list[DynamicVerification], source: str) -> list[dict[str, object]]:
-    grouped: dict[str, dict[str, object]] = {}
-    for item in sorted(verifications, key=lambda current: current.id, reverse=True):
-        detail = _parse_dynamic_evidence(item.evidence)
-        if detail.get("source") != source:
-            continue
-        batch_id = str(detail.get("batch_id") or f"legacy-{item.id}")
-        bucket = grouped.setdefault(
-            batch_id,
-            {
-                "batch_id": batch_id,
-                "created_at": _to_beijing_iso(item.created_at),
-                "created_at_ts": _to_beijing_ts(item.created_at) or 0,
-                "reason": detail.get("report_reason"),
-                "preferred_vector": detail.get("preferred_vector"),
-                "preferred_payload": detail.get("preferred_payload"),
-                "mode": detail.get("mode"),
-                "plan_provider": detail.get("plan_provider"),
-                "results": [],
-            },
-        )
-        bucket["results"].append(_serialize_verification(item))
-
-    reports: list[dict[str, object]] = []
-    for bucket in grouped.values():
-        results = sorted(
-            bucket["results"],
-            key=lambda current: (
-                int(current.get("round_index") or 0),
-                _dynamic_level_sort_key(str(current.get("level"))),
-                str(current.get("vector") or ""),
-                str(current.get("parameter_name") or ""),
-            ),
-        )
-        statuses = Counter(str(item.get("level") or "") for item in results)
         rounds = _build_runtime_rounds(results)
-        verdict = _summarize_runtime_report_v2(statuses, results, source)
+        verdict = _summarize_runtime_report(statuses, results, source)
         reports.append(
             {
                 "batch_id": bucket["batch_id"],
@@ -2507,7 +2601,7 @@ def _build_runtime_plan_analysis(
     }
 
 
-def _summarize_runtime_report_v2(
+def _summarize_runtime_report(
     statuses: Counter,
     results: list[dict[str, object]],
     source: str,
@@ -2595,47 +2689,6 @@ def _recommend_ai_multi_round_plan(
         "provider": "fallback",
         "reason": "根据页面输入面、风险线索和上下文类型，按最可能提高判断准确率的顺序执行安全探针验证。",
         "rounds": candidates[:limit],
-    }
-
-
-def _summarize_runtime_report(
-    statuses: Counter,
-    results: list[dict[str, object]],
-    source: str,
-) -> dict[str, str]:
-    confirmed = int(statuses.get("confirmed", 0))
-    suspected = int(statuses.get("suspected", 0))
-    not_triggered = int(statuses.get("not_triggered", 0))
-    if confirmed:
-        contexts = sorted({str(item.get("reflection_context_label") or "") for item in results if item.get("reflection_context_label")})
-        context_text = f"，主要出现在 {', '.join(contexts[:3])}" if contexts else ""
-        if source == "ai_multi_round":
-            return {
-                "value": "confirmed",
-                "label": "多轮验证已确认",
-                "reason": f"多轮验证中至少有 {confirmed} 条结果出现稳定回显或明确触发信号{context_text}，说明当前页面存在较强的输入进入输出链路。",
-            }
-        return {
-            "value": "confirmed",
-            "label": "验证已确认",
-            "reason": f"当前报告中至少有 {confirmed} 条结果出现稳定回显或明确触发信号{context_text}。",
-        }
-    if suspected:
-        return {
-            "value": "suspected",
-            "label": "仍需人工复核",
-            "reason": f"当前报告有 {suspected} 条结果出现可疑信号，但还没有稳定的已确认回显，建议继续结合源码和页面行为复核。",
-        }
-    if not_triggered and not confirmed and not suspected:
-        return {
-            "value": "not_triggered",
-            "label": "当前未触发",
-            "reason": f"本次报告共有 {not_triggered} 条结果未触发明显回显，说明当前探针组合暂未观察到稳定信号，但不代表页面一定安全。",
-        }
-    return {
-        "value": "unknown",
-        "label": "结果不足",
-        "reason": "当前报告缺少足够结果，暂时无法形成稳定结论。",
     }
 
 

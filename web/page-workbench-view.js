@@ -5,8 +5,8 @@ export const PAGE_WORKBENCH_TEMPLATE = `
         <div class="workbenchEyebrow">Page Verification Workbench</div>
         <h2 class="workbenchTitle">页面验证工作台</h2>
         <p class="workbenchText">
-          这里把页面输入面画像、关联风险、单点复测、动态结果和修复建议收在同一个视角里，
-          方便你围绕单个页面做验证和解释。
+          这里把页面输入面画像、关联风险、手工复测、AI 辅助多轮验证、动态验证结果和修复建议放在同一个视角里，
+          方便你围绕单个页面做验证、比较和解释。
         </p>
       </div>
       <div class="workbenchHeroMeta">
@@ -15,11 +15,11 @@ export const PAGE_WORKBENCH_TEMPLATE = `
           <span class="workbenchMetaValue mono">{{ workbenchData.page.url }}</span>
         </div>
         <div class="workbenchMetaCard">
-          <span class="workbenchMetaLabel">风险数量</span>
+          <span class="workbenchMetaLabel">关联风险数</span>
           <span class="workbenchMetaValue">{{ workbenchData.risk_summary.total_findings }}</span>
         </div>
         <div class="workbenchMetaCard">
-          <span class="workbenchMetaLabel">最高级别</span>
+          <span class="workbenchMetaLabel">最高等级</span>
           <span class="workbenchMetaValue">{{ workbenchData.risk_summary.highest_severity_label }}</span>
         </div>
       </div>
@@ -119,7 +119,7 @@ export const PAGE_WORKBENCH_TEMPLATE = `
             <div class="workbenchTagList" v-if="workbenchData.risk_summary.risky_api_hints.length">
               <span class="workbenchTag workbenchTagStrong" v-for="hint in workbenchData.risk_summary.risky_api_hints" :key="'hint-' + hint">{{ hint }}</span>
             </div>
-            <div class="muted-inline" v-else>当前页面没有特别集中的风险模式。</div>
+            <div class="muted-inline" v-else>当前页面没有特别集中的危险模式。</div>
             <div class="workbenchInlineMeta">
               <span>DOM 汇点：{{ workbenchData.risk_summary.dom_sink_hits }}</span>
               <span>内联事件：{{ workbenchData.risk_summary.inline_event_hits }}</span>
@@ -129,14 +129,69 @@ export const PAGE_WORKBENCH_TEMPLATE = `
         </div>
       </section>
 
-      <section class="workbenchPanel">
-        <div class="workbenchSectionTitle">单点复测</div>
-        <div class="workbenchCallout" v-if="workbenchData.retest_strategy">
-          <div><strong>自动选择说明：</strong>{{ workbenchData.retest_strategy.reason }}</div>
-          <div v-if="workbenchData.retest_strategy.preferred_vector"><strong>推荐向量：</strong>{{ workbenchData.retest_strategy.preferred_vector }}</div>
-          <div v-if="workbenchData.retest_strategy.preferred_payload" class="mono"><strong>默认探针：</strong>{{ workbenchData.retest_strategy.preferred_payload.payload }}</div>
+      <section class="workbenchPanel workbenchPayloadPanel">
+        <div class="workbenchSectionHeader">
+          <div>
+            <div class="workbenchSectionTitle" @click="payloadResultsExpanded = !payloadResultsExpanded" style="cursor:pointer;user-select:none">
+              Payload 与复测结果
+              <span style="font-size:12px;opacity:0.6;margin-left:6px">{{ payloadResultsExpanded ? '收起' : '展开' }}</span>
+            </div>
+            <div class="workbenchSectionSub">按"输入向量 -> payload -> 响应证据 -> 结论"展示验证过程。</div>
+          </div>
+          <div class="workbenchMiniStats" v-if="currentRetestReport">
+            <span>{{ currentRetestReport.result_count }} 条结果</span>
+            <span>{{ currentRetestReport.status_summary.confirmed }} 已确认</span>
+            <span>{{ currentRetestReport.status_summary.suspected }} 可疑</span>
+          </div>
         </div>
-        <div class="retest-card workbenchRetestCard">
+        <template v-if="payloadResultsExpanded">
+          <div class="workbenchCallout" v-if="workbenchData.retest_strategy">
+            <div><strong>自动选择说明：</strong>{{ workbenchData.retest_strategy.reason }}</div>
+            <div class="workbenchInlineMeta">
+              <span v-if="workbenchData.retest_strategy.preferred_vector">推荐向量：{{ workbenchData.retest_strategy.preferred_vector }}</span>
+              <span v-if="workbenchData.retest_strategy.preferred_payload" class="mono">默认探针：{{ workbenchData.retest_strategy.preferred_payload.payload }}</span>
+            </div>
+          </div>
+          <div class="payloadResultGrid" v-if="workbenchData.successful_payloads && workbenchData.successful_payloads.length">
+            <article class="payloadResultCard confirmed" v-for="(item, idx) in workbenchData.successful_payloads" :key="'successful-payload-' + idx">
+              <div class="payloadResultHeader">
+                <div>
+                  <div class="payloadResultKicker">成功 Payload {{ idx + 1 }}</div>
+                  <div class="payloadResultTitle">{{ item.level_label || item.level }} / {{ item.vector || '-' }} / {{ item.parameter_name || '-' }}</div>
+                </div>
+                <span class="payloadStatusBadge confirmed">已确认</span>
+              </div>
+              <div class="payloadCodeBlock mono">{{ item.payload }}</div>
+              <div class="payloadEvidenceGrid">
+                <div v-if="item.why_it_worked">
+                  <span>有效原因</span>
+                  <strong>{{ item.why_it_worked }}</strong>
+                </div>
+                <div v-if="item.construction && item.construction.request_construction">
+                  <span>构造方式</span>
+                  <strong>{{ item.construction.request_construction }}</strong>
+                </div>
+                <div v-if="item.reflection_snippet">
+                  <span>命中片段</span>
+                  <strong>{{ item.reflection_snippet }}</strong>
+                </div>
+                <div v-if="item.target_url">
+                  <span>目标 URL</span>
+                  <strong class="mono">{{ item.target_url }}</strong>
+                </div>
+              </div>
+              <div class="code-block compactCode" v-if="item.construction && item.construction.markup_construction">{{ item.construction.markup_construction }}</div>
+              <div class="code-block compactCode" v-if="item.construction && item.construction.snippet_before">{{ item.construction.snippet_before }}</div>
+              <div class="code-block compactCode" v-if="item.construction && item.construction.snippet_after">{{ item.construction.snippet_after }}</div>
+              <div class="payloadActions">
+                <button class="topActionBtn" @click="applySuccessfulPayload(item)">带入复测</button>
+                <button class="topActionBtn topActionBtnSecondary" @click="copyToClipboard(item.payload, 'Payload 已复制')">复制 Payload</button>
+                <button class="topActionBtn topActionBtnSecondary" v-if="item.target_url" @click="copyToClipboard(item.target_url, '目标地址已复制')">复制目标 URL</button>
+              </div>
+            </article>
+          </div>
+        </template>
+        <div id="retest-section" class="retest-card workbenchRetestCard payloadControlCard">
           <div class="retest-toolbar">
             <button class="topActionBtn retest-btn" :disabled="workbenchRetesting" @click="runWorkbenchRetest()">
               {{ workbenchRetesting ? '复测中...' : '开始复测' }}
@@ -164,23 +219,51 @@ export const PAGE_WORKBENCH_TEMPLATE = `
           <div class="retest-feedback-row">
             <span class="muted-inline">{{ workbenchRetestFeedback || '会基于当前页面的输入面做一次轻量复测。' }}</span>
           </div>
-          <div class="workbenchReportHeader" v-if="currentRetestReport">
+          <div class="workbenchReportHeader payloadReportHeader" v-if="currentRetestReport">
             <div class="muted-inline">
               当前报告：{{ formatDateTime(currentRetestReport.created_at) }} / {{ currentRetestReport.result_count }} 条结果
             </div>
           </div>
-          <div class="retest-summary-list" v-if="currentRetestReport && currentRetestReport.results.length">
-            <div class="retest-summary-item" v-for="(item, idx) in currentRetestReport.results" :key="'workbench-retest-' + currentRetestReport.batch_id + '-' + idx">
-              <div class="retest-summary-meta">
-                <span class="pill" :class="'sev_' + (item.level === 'confirmed' ? 'high' : item.level === 'suspected' ? 'medium' : 'low')">
+          <div class="payloadResultGrid" v-if="currentRetestReport && currentRetestReport.results.length">
+            <article
+              class="payloadResultCard"
+              :class="item.level === 'confirmed' ? 'confirmed' : item.level === 'suspected' ? 'suspected' : 'notTriggered'"
+              v-for="(item, idx) in currentRetestReport.results"
+              :key="'workbench-retest-' + currentRetestReport.batch_id + '-' + idx"
+            >
+              <div class="payloadResultHeader">
+                <div>
+                  <div class="payloadResultKicker">{{ item.vector || '-' }} / {{ item.parameter_name || '-' }}</div>
+                  <div class="payloadResultTitle">{{ item.summary }}</div>
+                </div>
+                <span class="payloadStatusBadge" :class="item.level === 'confirmed' ? 'confirmed' : item.level === 'suspected' ? 'suspected' : 'notTriggered'">
                   {{ item.level_label || item.level }}
                 </span>
-                <span>{{ item.vector }}</span>
-                <span v-if="item.parameter_name">{{ item.parameter_name }}</span>
-                <span class="workbenchMetaBadge" :class="{ strong: item.reflection_found }">
-                  {{ item.reflection_found ? '已发现回显' : '未发现回显' }}
-                </span>
-                <span class="workbenchMetaBadge" v-if="item.reflection_context_label">{{ item.reflection_context_label }}</span>
+              </div>
+              <div class="payloadCodeBlock mono">{{ item.payload || '-' }}</div>
+              <div class="payloadEvidenceGrid">
+                <div>
+                  <span>回显状态</span>
+                  <strong>{{ item.reflection_found ? '已发现回显' : '未发现回显' }}</strong>
+                </div>
+                <div v-if="item.reflection_context_label">
+                  <span>上下文</span>
+                  <strong>{{ item.reflection_context_label }}</strong>
+                </div>
+                <div v-if="item.context_hint">
+                  <span>说明</span>
+                  <strong>{{ item.context_hint }}</strong>
+                </div>
+                <div v-if="item.target_url">
+                  <span>目标 URL</span>
+                  <strong class="mono">{{ item.target_url }}</strong>
+                </div>
+              </div>
+              <div class="payloadSnippet" v-if="item.evidence">证据：{{ item.evidence }}</div>
+              <div class="payloadSnippet" v-if="item.reflection_snippet">命中片段：{{ item.reflection_snippet }}</div>
+              <div class="payloadActions">
+                <button class="topActionBtn topActionBtnSecondary" v-if="item.payload" @click="copyToClipboard(item.payload, 'Payload 已复制')">复制 Payload</button>
+                <button class="topActionBtn topActionBtnSecondary" v-if="item.target_url" @click="copyToClipboard(item.target_url, '目标地址已复制')">复制目标 URL</button>
                 <button
                   v-if="item.id"
                   type="button"
@@ -191,14 +274,37 @@ export const PAGE_WORKBENCH_TEMPLATE = `
                   {{ deletingRetestResultId === String(item.id) ? '删除中...' : '删除' }}
                 </button>
               </div>
-              <div class="retest-summary-text">{{ item.summary }}</div>
-              <div class="retest-summary-text" v-if="item.context_hint">说明：{{ item.context_hint }}</div>
-              <div class="retest-summary-text" v-if="item.evidence">证据：{{ item.evidence }}</div>
-              <div class="retest-summary-text" v-if="item.reflection_snippet">命中片段：{{ item.reflection_snippet }}</div>
-              <div class="retest-summary-text" v-if="item.target_url">目标：{{ item.target_url }}</div>
-            </div>
+            </article>
           </div>
         </div>
+      </section>
+
+      <section class="workbenchPanel">
+        <div class="workbenchSectionTitle" @click="retestRecordsExpanded = !retestRecordsExpanded" style="cursor:pointer;user-select:none">
+          复测记录 <span style="font-size:12px;opacity:0.6">{{ retestRecordsExpanded ? '收起' : '展开' }}</span>
+        </div>
+        <template v-if="retestRecordsExpanded">
+          <div class="workbenchList" v-if="workbenchData.manual_retest_reports && workbenchData.manual_retest_reports.length">
+            <article
+              class="workbenchListItem workbenchResultItem workbenchReportItem"
+              :class="{ active: selectedRetestReportId === item.batch_id }"
+              v-for="item in workbenchData.manual_retest_reports"
+              :key="'manual-report-' + item.batch_id"
+              @click="selectRetestReport(item.batch_id)"
+            >
+              <div>
+                <div class="workbenchResultTitle">{{ formatDateTime(item.created_at) }}</div>
+                <div class="muted-inline">{{ item.result_count }} 条结果 / 向量：{{ item.vectors.join(', ') || '-' }}</div>
+                <div class="muted-inline" v-if="item.reason">{{ item.reason }}</div>
+              </div>
+              <div class="workbenchReportActions">
+                <span class="workbenchMetaBadge strong">{{ item.status_summary.confirmed }} 已确认</span>
+                <span class="workbenchMetaBadge">{{ item.status_summary.not_triggered }} 未触发</span>
+              </div>
+            </article>
+          </div>
+          <div class="muted-inline" v-else>当前页面还没有复测记录。</div>
+        </template>
       </section>
 
       <section class="workbenchPanel">
@@ -214,30 +320,6 @@ export const PAGE_WORKBENCH_TEMPLATE = `
           </article>
         </div>
         <div class="muted-inline" v-else>当前页面没有关联发现。</div>
-      </section>
-
-      <section class="workbenchPanel">
-        <div class="workbenchSectionTitle">复测记录</div>
-        <div class="workbenchList" v-if="workbenchData.manual_retest_reports && workbenchData.manual_retest_reports.length">
-          <article
-            class="workbenchListItem workbenchResultItem workbenchReportItem"
-            :class="{ active: selectedRetestReportId === item.batch_id }"
-            v-for="item in workbenchData.manual_retest_reports"
-            :key="'manual-report-' + item.batch_id"
-            @click="selectRetestReport(item.batch_id)"
-          >
-            <div>
-              <div class="workbenchResultTitle">{{ formatDateTime(item.created_at) }}</div>
-              <div class="muted-inline">{{ item.result_count }} 条结果 / 向量：{{ item.vectors.join(', ') || '-' }}</div>
-              <div class="muted-inline" v-if="item.reason">{{ item.reason }}</div>
-            </div>
-            <div class="workbenchReportActions">
-              <span class="workbenchMetaBadge strong">{{ item.status_summary.confirmed }} 已确认</span>
-              <span class="workbenchMetaBadge">{{ item.status_summary.not_triggered }} 未触发</span>
-            </div>
-          </article>
-        </div>
-        <div class="muted-inline" v-else>当前页面还没有复测记录。</div>
       </section>
 
       <section class="workbenchPanel" v-if="currentRetestReport && compareRetestReport && retestComparison">
@@ -339,7 +421,7 @@ export const PAGE_WORKBENCH_TEMPLATE = `
       <section class="workbenchPanel">
         <div class="workbenchSectionTitle">AI辅助多轮验证</div>
         <div class="workbenchCallout">
-          <div>这里会使用安全探针而不是可执行 payload，按多轮顺序验证 query / form / hash 等输入面，目标是提高判断准确率。</div>
+          <div>这里使用的是安全探针而不是可执行 payload，会按多轮顺序验证 query / form / hash 等输入面，目标是提高判断准确率。</div>
         </div>
         <div class="workbenchAiToolbar">
           <select class="input workbenchAiSelect" v-model="aiValidateMode">
@@ -409,17 +491,57 @@ export const PAGE_WORKBENCH_TEMPLATE = `
             </div>
             <div class="muted-inline" v-else>当前没有可展示的轮次计划。</div>
           </div>
+          <div class="workbenchCard" v-if="currentAIMultiRoundReport.plan_analysis">
+            <div class="workbenchCardTitle">计划与实际</div>
+            <div class="muted-inline"><strong>贡献最大的一轮：</strong>{{ currentAIMultiRoundReport.plan_analysis.best_round_label || '-' }}</div>
+            <div class="muted-inline"><strong>最有效向量：</strong>{{ currentAIMultiRoundReport.plan_analysis.best_vector || '-' }}</div>
+            <div class="muted-inline" v-if="currentAIMultiRoundReport.plan_analysis.key_parameter"><strong>关键参数：</strong>{{ currentAIMultiRoundReport.plan_analysis.key_parameter }}</div>
+            <div class="muted-inline"><strong>最强信号：</strong>{{ currentAIMultiRoundReport.plan_analysis.strongest_signal_label || '-' }}</div>
+            <div class="muted-inline" v-if="currentAIMultiRoundReport.plan_analysis.strongest_signal_reason">
+              {{ currentAIMultiRoundReport.plan_analysis.strongest_signal_reason }}
+            </div>
+            <div class="workbenchCompareList" v-if="currentAIMultiRoundReport.plan_analysis.expectations && currentAIMultiRoundReport.plan_analysis.expectations.length">
+              <article class="workbenchCompareItem" v-for="item in currentAIMultiRoundReport.plan_analysis.expectations" :key="'ai-expect-' + item.round_index">
+                <div class="workbenchCompareTitle">{{ item.round_label }}</div>
+                <div class="workbenchCompareRow">
+                  <span class="workbenchCompareTag current">{{ item.status_label }}</span>
+                  <span>{{ item.vector || '-' }}</span>
+                  <span>{{ item.confirmed_count }} 已确认 / {{ item.suspected_count }} 可疑</span>
+                </div>
+                <div class="muted-inline">{{ item.reason }}</div>
+              </article>
+            </div>
+          </div>
           <div class="workbenchCard">
             <div class="workbenchCardTitle">轮次结果</div>
-            <div class="workbenchCompareList" v-if="currentAIMultiRoundReport.results && currentAIMultiRoundReport.results.length">
-              <article class="workbenchCompareItem" v-for="item in currentAIMultiRoundReport.results" :key="'ai-round-' + item.id">
-                <div class="workbenchCompareTitle">{{ item.round_label || '多轮验证' }} / {{ item.vector || '-' }} / {{ item.parameter_name || '-' }}</div>
-                <div class="workbenchCompareRow">
-                  <span class="workbenchCompareTag current">{{ item.level_label }}</span>
-                  <span>{{ item.reflection_found ? '有回显' : '无回显' }}</span>
-                  <span v-if="item.reflection_context_label">{{ item.reflection_context_label }}</span>
+            <div class="payloadResultGrid payloadResultGridSingle" v-if="currentAIMultiRoundReport.results && currentAIMultiRoundReport.results.length">
+              <article
+                class="payloadResultCard compact"
+                :class="item.level === 'confirmed' ? 'confirmed' : item.level === 'suspected' ? 'suspected' : 'notTriggered'"
+                v-for="item in currentAIMultiRoundReport.results"
+                :key="'ai-round-' + item.id"
+              >
+                <div class="payloadResultHeader">
+                  <div>
+                    <div class="payloadResultKicker">{{ item.round_label || '多轮验证' }}</div>
+                    <div class="payloadResultTitle">{{ item.vector || '-' }} / {{ item.parameter_name || '-' }}</div>
+                  </div>
+                  <span class="payloadStatusBadge" :class="item.level === 'confirmed' ? 'confirmed' : item.level === 'suspected' ? 'suspected' : 'notTriggered'">
+                    {{ item.level_label }}
+                  </span>
                 </div>
-                <div class="muted-inline" v-if="item.round_reason">{{ item.round_reason }}</div>
+                <div class="payloadCodeBlock mono">{{ item.payload || '-' }}</div>
+                <div class="payloadEvidenceGrid">
+                  <div>
+                    <span>回显状态</span>
+                    <strong>{{ item.reflection_found ? '有回显' : '无回显' }}</strong>
+                  </div>
+                  <div v-if="item.reflection_context_label">
+                    <span>上下文</span>
+                    <strong>{{ item.reflection_context_label }}</strong>
+                  </div>
+                </div>
+                <div class="payloadSnippet" v-if="item.round_reason">{{ item.round_reason }}</div>
               </article>
             </div>
             <div class="muted-inline" v-else>当前还没有 AI 多轮验证结果。</div>
@@ -427,6 +549,112 @@ export const PAGE_WORKBENCH_TEMPLATE = `
         </div>
         <div class="muted-inline" v-else-if="!aiValidateLoading">
           启动后会自动执行多轮安全探针验证，并把最新结果保存在工作台中。
+        </div>
+      </section>
+
+      <section class="workbenchPanel">
+        <div class="workbenchSectionTitle">AI 生成 Payload</div>
+        <div class="workbenchCallout">
+          <div>AI 会根据当前页面的静态分析发现（数据流路径、危险 Sink、回显上下文等）生成针对性的 XSS 验证 Payload。</div>
+          <div class="workbenchInlineMeta">
+            <span>探针模式：只生成安全标记，不触发执行</span>
+            <span>利用模式：生成真实 XSS payload</span>
+          </div>
+        </div>
+        <div class="workbenchAiToolbar">
+          <select class="input workbenchAiSelect" v-model="aiPayloadMode">
+            <option value="probe">安全探针模式</option>
+            <option value="exploit">利用验证模式</option>
+          </select>
+          <button
+            class="topActionBtn"
+            :disabled="aiPayloadLoading"
+            @click="runAIGeneratePayload(
+              workbenchData.related_findings && workbenchData.related_findings[0] ? workbenchData.related_findings[0].kind : '',
+              workbenchData.related_findings && workbenchData.related_findings[0] ? workbenchData.related_findings[0].title : ''
+            )"
+          >
+            {{ aiPayloadLoading ? '生成中...' : 'AI 生成 Payload' }}
+          </button>
+        </div>
+        <div class="muted-inline" v-if="aiPayloadError">AI 生成失败：{{ aiPayloadError }}</div>
+        <div class="workbenchAiResult" v-if="aiPayloadResult">
+          <div><strong>模式：</strong>{{ aiPayloadResult.mode === 'probe' ? '安全探针' : '利用验证' }}</div>
+          <div v-if="aiPayloadResult.finding">
+            <strong>针对发现：</strong>{{ aiPayloadResult.finding.title }}（{{ aiPayloadResult.finding.severity }}）
+          </div>
+        </div>
+        <div class="payloadResultGrid" v-if="aiPayloadResult && aiPayloadResult.payloads && aiPayloadResult.payloads.length">
+          <article
+            class="payloadResultCard confirmed"
+            v-for="(item, idx) in aiPayloadResult.payloads"
+            :key="'ai-payload-' + idx"
+          >
+            <div class="payloadResultHeader">
+              <div>
+                <div class="payloadResultKicker">AI Payload {{ idx + 1 }}</div>
+                <div class="payloadResultTitle">{{ item.vector || '-' }} / {{ item.context || '-' }}</div>
+              </div>
+              <span class="payloadStatusBadge confirmed">{{ aiPayloadResult.mode === 'probe' ? '探针' : '利用' }}</span>
+            </div>
+            <div class="payloadCodeBlock mono">{{ item.payload }}</div>
+            <div class="payloadEvidenceGrid">
+              <div v-if="item.reason">
+                <span>设计理由</span>
+                <strong>{{ item.reason }}</strong>
+              </div>
+            </div>
+            <div class="payloadActions">
+              <button class="topActionBtn" @click="applyAIGeneratedPayload(item)">带入复测</button>
+              <button class="topActionBtn topActionBtnSecondary" @click="copyToClipboard(item.payload, 'Payload 已复制')">复制 Payload</button>
+            </div>
+          </article>
+        </div>
+        <div class="muted-inline" v-else-if="!aiPayloadLoading && !aiPayloadError">
+          点击按钮后，AI 会分析当前页面的数据流发现并生成针对性 Payload。
+        </div>
+        <div class="workbenchList" v-if="workbenchData.ai_payload_reports && workbenchData.ai_payload_reports.length" style="margin-top:16px">
+          <div class="workbenchCardTitle">历史记录</div>
+          <article
+            class="workbenchListItem workbenchResultItem workbenchReportItem"
+            :class="{ active: aiPayloadExpandedReportId === report.id }"
+            v-for="report in workbenchData.ai_payload_reports"
+            :key="'ai-payload-report-' + report.id"
+            @click="toggleAIPayloadReport(report.id)"
+          >
+            <div>
+              <div class="workbenchResultTitle">{{ formatDateTime(report.created_at) }}</div>
+              <div class="muted-inline">{{ report.mode === 'probe' ? '安全探针' : '利用验证' }} / {{ report.payloads.length }} 个 payload</div>
+              <div class="muted-inline" v-if="report.finding_title">针对：{{ report.finding_title }}</div>
+            </div>
+          </article>
+          <div v-if="aiPayloadExpandedReportId && workbenchData.ai_payload_reports.find(r => r.id === aiPayloadExpandedReportId)" style="margin-top:8px">
+            <div class="payloadResultGrid">
+              <article
+                class="payloadResultCard confirmed"
+                v-for="(item, idx) in (workbenchData.ai_payload_reports.find(r => r.id === aiPayloadExpandedReportId).payloads || [])"
+                :key="'expanded-payload-' + idx"
+              >
+                <div class="payloadResultHeader">
+                  <div>
+                    <div class="payloadResultKicker">AI Payload {{ idx + 1 }}</div>
+                    <div class="payloadResultTitle">{{ item.vector || '-' }} / {{ item.context || '-' }}</div>
+                  </div>
+                </div>
+                <div class="payloadCodeBlock mono">{{ item.payload }}</div>
+                <div class="payloadEvidenceGrid">
+                  <div v-if="item.reason">
+                    <span>设计理由</span>
+                    <strong>{{ item.reason }}</strong>
+                  </div>
+                </div>
+                <div class="payloadActions">
+                  <button class="topActionBtn" @click.stop="applyAIGeneratedPayload(item)">带入复测</button>
+                  <button class="topActionBtn topActionBtnSecondary" @click.stop="copyToClipboard(item.payload, 'Payload 已复制')">复制 Payload</button>
+                </div>
+              </article>
+            </div>
+          </div>
         </div>
       </section>
 
