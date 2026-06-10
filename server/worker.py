@@ -67,7 +67,7 @@ class SeleniumMiddleware:
         try:
             self._init_driver()
             spider.logger.debug(f"Selenium 正在渲染: {request.url}")
-            self.driver.get(request.url)
+            self.driver.get(request.url) # 浏览器加载页面
             time.sleep(self.wait_seconds)
             body = (self.driver.page_source or "").encode("utf-8", "ignore")
             return HtmlResponse(
@@ -142,7 +142,7 @@ class JobSpec:
 
 
 def run_worker(job: JobSpec, out_queue: mp.Queue, stop_event: mp.Event) -> None:
-    init_worker(out_queue=out_queue, stop_event=stop_event)
+    init_worker(out_queue=out_queue, stop_event=stop_event) # 保存队列和停止信号
     push_event(job.job_id, "log", {"message": "worker started"})
     logging.getLogger("selenium").setLevel(logging.WARNING)
     logging.getLogger("urllib3").setLevel(logging.WARNING)
@@ -162,13 +162,13 @@ def run_worker(job: JobSpec, out_queue: mp.Queue, stop_event: mp.Event) -> None:
     settings.set("RETRY_TIMES", get_int("CRAWLER_RETRY_TIMES", 2), priority="project")
     settings.set("LOG_ENABLED", True, priority="project")
     settings.set("LOG_LEVEL", str(get("SCRAPY_LOG_LEVEL", "DEBUG")), priority="project")
-    settings.set("EXTENSIONS", {"server.worker.LogPushExtension": 100}, priority="project")
+    settings.set("EXTENSIONS", {"server.worker.LogPushExtension": 100}, priority="project") # 捕获 Scrapy 日志
     if get_bool("SELENIUM_ENABLED", True):
-        settings.set("DOWNLOADER_MIDDLEWARES", {"server.worker.SeleniumMiddleware": 800}, priority="project")
+        settings.set("DOWNLOADER_MIDDLEWARES", {"server.worker.SeleniumMiddleware": 800}, priority="project") # 可选浏览器渲染
 
     process = CrawlerProcess(settings=settings)
     process.crawl(
-        DeepSpider,
+        DeepSpider, # 交给 spider.py 的爬虫类
         target_url=job.target_url,
         max_depth=job.max_depth,
         max_pages=job.max_pages,
@@ -176,8 +176,8 @@ def run_worker(job: JobSpec, out_queue: mp.Queue, stop_event: mp.Event) -> None:
         job_id=job.job_id,
     )
     try:
-        process.start(stop_after_crawl=True)
-        push_event(job.job_id, "done", {})
+        process.start(stop_after_crawl=True) # 阻塞运行到爬虫结束
+        push_event(job.job_id, "done", {}) # 通知 Runner 完成
     except Exception as e:
         push_event(job.job_id, "error", {"message": str(e)})
 

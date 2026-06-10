@@ -196,7 +196,7 @@
           async function apiFetch(url, options = {}) {
             const headers = new Headers(options.headers || {})
             if (authToken.value) {
-              headers.set('Authorization', `Bearer ${authToken.value}`)
+              headers.set('Authorization', `Bearer ${authToken.value}`) // 后端鉴权用
             }
             const response = await fetch(url, { ...options, headers })
             if (response.status === 401 && authToken.value) {
@@ -216,7 +216,7 @@
               authUser.value = null
               return
             }
-            const res = await apiFetch(`${apiBase.value}/auth/me`)
+            const res = await apiFetch(`${apiBase.value}/auth/me`) // 检查登录态
             const body = await res.json()
             if (!body.authenticated) {
               authToken.value = ''
@@ -236,7 +236,7 @@
             authError.value = ''
             try {
               const endpoint = authMode.value === 'login' ? '/auth/login' : '/auth/register'
-              const res = await fetch(`${apiBase.value}${endpoint}`, {
+              const res = await fetch(`${apiBase.value}${endpoint}`, { // 登录或注册
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(authForm.value)
@@ -260,7 +260,7 @@
 
           async function logout() {
             try {
-              await apiFetch(`${apiBase.value}/auth/logout`, { method: 'POST' })
+              await apiFetch(`${apiBase.value}/auth/logout`, { method: 'POST' }) // 后端退出登录
             } catch (_) {}
             authToken.value = ''
             authUser.value = null
@@ -331,14 +331,14 @@
           }
 
           async function fetchJobs() {
-            const res = await apiFetch(`${apiBase.value}/jobs`)
+            const res = await apiFetch(`${apiBase.value}/jobs`) // 获取任务列表
             jobs.value = await res.json()
             if (!selectedJobId.value && jobs.value.length) selectedJobId.value = jobs.value[0].id
           }
 
           async function fetchReport(jobId) {
             if (!jobId) return
-            const res = await apiFetch(`${apiBase.value}/jobs/${jobId}/report`)
+            const res = await apiFetch(`${apiBase.value}/jobs/${jobId}/report`) // 获取任务报告
             const data = await res.json()
             report.value = data
             if (selectedFinding.value && data.findings?.length) {
@@ -373,11 +373,11 @@
               reportTimer = null
             }
             const eventsUrl = `${apiBase.value}/jobs/${jobId}/events?auth_token=${encodeURIComponent(authToken.value || '')}`
-            es = new EventSource(eventsUrl)
+            es = new EventSource(eventsUrl) // 监听后端实时事件
             es.addEventListener('log', (ev) => {
               const msg = JSON.parse(ev.data)
               const newLog = { ts: msg.ts, message: msg.data?.message || '' }
-              logs.value.push(newLog)
+              logs.value.push(newLog) // 追加日志
               if (logs.value.length > 2000) logs.value.splice(0, logs.value.length - 2000)
               
               nextTick(() => {
@@ -386,14 +386,14 @@
               })
             })
             es.addEventListener('job', async () => {
-              await fetchJobs()
-              triggerReportUpdate(jobId)
+              await fetchJobs() // 刷新任务状态
+              triggerReportUpdate(jobId) // 刷新报告
             })
             es.addEventListener('page', () => {
-              triggerReportUpdate(jobId)
+              triggerReportUpdate(jobId) // 新页面入库后刷新
             })
             es.addEventListener('finding', () => {
-              triggerReportUpdate(jobId)
+              triggerReportUpdate(jobId) // 新风险点入库后刷新
             })
             es.addEventListener('error', async (ev) => {
               const msg = JSON.parse(ev.data)
@@ -410,17 +410,17 @@
             }
             creating.value = true
             try {
-              const res = await apiFetch(`${apiBase.value}/jobs`, {
+              const res = await apiFetch(`${apiBase.value}/jobs`, { // 创建扫描任务
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(form.value)
               })
               const body = await res.json()
               if (!res.ok) throw new Error(body.error || '创建失败')
-              await fetchJobs()
+              await fetchJobs() // 刷新任务列表
               selectedJobId.value = body.job_id
-              await fetchReport(body.job_id)
-              attachEvents(body.job_id)
+              await fetchReport(body.job_id) // 拉取初始报告
+              attachEvents(body.job_id) // 监听任务事件
             } catch (err) {
               alert(`扫描启动失败: ${err.message}`)
             } finally {
@@ -429,7 +429,7 @@
           }
 
           async function stopJob(jobId) {
-            await apiFetch(`${apiBase.value}/jobs/${jobId}/stop`, { method: 'POST' })
+            await apiFetch(`${apiBase.value}/jobs/${jobId}/stop`, { method: 'POST' }) // 停止扫描
             await fetchJobs()
             await fetchReport(jobId)
           }
@@ -437,7 +437,7 @@
           async function deleteJob(jobId) {
             if (!confirm('确定要彻底删除该任务及其所有扫描结果吗？此操作不可恢复。')) return
             try {
-              const res = await apiFetch(`${apiBase.value}/jobs/${jobId}`, { method: 'DELETE' })
+              const res = await apiFetch(`${apiBase.value}/jobs/${jobId}`, { method: 'DELETE' }) // 删除任务
               if (!res.ok) throw new Error('删除失败')
               if (selectedJobId.value === jobId) {
                 selectedJobId.value = null
@@ -459,7 +459,7 @@
               const startTime = Date.now()
               logs.value.push({ ts: startTime / 1000, message: `[AI分析] 开始分析任务 ${jobId}` })
               
-              const res = await apiFetch(`${apiBase.value}/jobs/${jobId}/analyze`, { method: 'POST' })
+              const res = await apiFetch(`${apiBase.value}/jobs/${jobId}/analyze`, { method: 'POST' }) // 启动 AI 任务分析
               
               if (!res.ok) {
                 const error = await res.json()
@@ -488,7 +488,7 @@
           async function fetchAIReport(jobId) {
             if (!jobId) return
             try {
-              const res = await apiFetch(`${apiBase.value}/jobs/${jobId}/ai-report`)
+              const res = await apiFetch(`${apiBase.value}/jobs/${jobId}/ai-report`) // 获取 AI 报告
               aiReport.value = await res.json()
             } catch (err) {
               console.error('获取AI报告失败:', err)
@@ -499,7 +499,7 @@
           async function exportReport(format = 'html') {
             if (!selectedJob.value?.id) return
             try {
-              const res = await apiFetch(buildExportUrl(apiBase.value, selectedJob.value.id, format, authToken.value))
+              const res = await apiFetch(buildExportUrl(apiBase.value, selectedJob.value.id, format, authToken.value)) // 导出报告
               if (!res.ok) {
                 const body = await res.json().catch(() => ({}))
                 throw new Error(body.error || '导出报告失败')
@@ -681,16 +681,17 @@
             customRetestPayload.value = ''
           }
 
-          async function updateFindingStatus(status) {
+          async function updateFindingStatus(status, note = null) {
             if (!selectedJobId.value || !selectedFinding.value) return
             try {
-              const res = await apiFetch(`${apiBase.value}/jobs/${selectedJobId.value}/finding-status`, {
+              const res = await apiFetch(`${apiBase.value}/jobs/${selectedJobId.value}/finding-status`, { // 更新人工复核状态
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                   kind: selectedFinding.value.kind,
                   title: selectedFinding.value.title,
-                  status
+                  status,
+                  note: note === null ? (selectedFinding.value.review_note || '') : note
                 })
               })
               const body = await res.json()
@@ -706,7 +707,7 @@
             if (!selectedJobId.value || !selectedPage.value) return
             findingPayloadSuggestionsLoading.value = true
             try {
-              const res = await apiFetch(`${apiBase.value}/jobs/${selectedJobId.value}/pages/payloads`, {
+              const res = await apiFetch(`${apiBase.value}/jobs/${selectedJobId.value}/pages/payloads`, { // 获取推荐 payload
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -795,7 +796,7 @@
             retestingFinding.value = true
             findingRetestFeedback.value = '正在执行单点复测...'
             try {
-              const res = await apiFetch(`${apiBase.value}/jobs/${selectedJobId.value}/pages/retest`, {
+              const res = await apiFetch(`${apiBase.value}/jobs/${selectedJobId.value}/pages/retest`, { // 执行页面复测
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -865,7 +866,7 @@
             workbenchRetesting.value = true
             workbenchRetestFeedback.value = '正在执行页面复测...'
             try {
-              const res = await apiFetch(`${apiBase.value}/jobs/${selectedJobId.value}/pages/retest`, {
+              const res = await apiFetch(`${apiBase.value}/jobs/${selectedJobId.value}/pages/retest`, { // 工作台页面复测
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({

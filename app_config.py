@@ -9,15 +9,15 @@ from typing import Any
 @lru_cache(maxsize=1)
 def settings_module() -> Any | None:
     try:
-        return importlib.import_module("settings")
+        return importlib.import_module("settings") # 加载本地配置
     except Exception:
         return None
 
 
 def get(name: str, default: Any = None) -> Any:
     if name in os.environ:
-        return os.environ[name]
-    mod = settings_module()
+        return os.environ[name] # 环境变量优先
+    mod = settings_module() # 再读 settings.py
     if mod is not None and hasattr(mod, name):
         return getattr(mod, name)
     return default

@@ -28,7 +28,7 @@ class EventBus:
                 q = queue.Queue(maxsize=10_000)
                 self._queues[job_id] = q
         try:
-            q.put_nowait(evt)
+            q.put_nowait(evt) # 写入当前任务事件队列
         except queue.Full:
             try:
                 _ = q.get_nowait()
@@ -53,8 +53,8 @@ class EventBus:
                     {"ts": evt.ts, "type": evt.type, "data": evt.data},
                     ensure_ascii=False,
                 )
-                yield f"event: {evt.type}\n"
-                yield f"data: {payload}\n\n"
+                yield f"event: {evt.type}\n" # SSE 事件名
+                yield f"data: {payload}\n\n" # SSE 数据
             except queue.Empty:
                 yield "event: heartbeat\n"
                 yield "data: {}\n\n"

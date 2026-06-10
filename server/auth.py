@@ -9,18 +9,18 @@ from server.models import User
 
 
 def hash_password(password: str) -> str:
-    return generate_password_hash(password)
+    return generate_password_hash(password) # 注册时生成密码哈希
 
 
 def verify_password(password_hash: str, password: str) -> bool:
     try:
-        return check_password_hash(password_hash, password)
+        return check_password_hash(password_hash, password) # 登录时校验密码
     except Exception:
         return False
 
 
 def issue_token(user: User) -> str:
-    token = secrets.token_urlsafe(32)
+    token = secrets.token_urlsafe(32) # 生成登录 token
     user.auth_token = token
     return token
 
@@ -40,5 +40,5 @@ def serialize_user(user: User) -> dict[str, Any]:
         "id": user.id,
         "username": user.username,
         "display_name": user.display_name or user.username,
-        "created_at": user.created_at.isoformat() if user.created_at else None,
+        "created_at": user.created_at.isoformat() if user.created_at else None, # 返回给前端
     }

@@ -21,13 +21,13 @@ def main(argv: Sequence[str]) -> int:
         os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else ""
     )
 
-    backend_cmd = [sys.executable, os.path.join(root, "run_dev.py")]
+    backend_cmd = [sys.executable, os.path.join(root, "run_dev.py")] # 后端启动命令
     frontend_host = str(get("FRONTEND_HOST", "127.0.0.1"))
     frontend_port = str(get_int("FRONTEND_PORT", 5173))
     frontend_dir = str(get("FRONTEND_DIR", os.path.join(root, "web")))
     if not os.path.isabs(frontend_dir):
         frontend_dir = os.path.join(root, frontend_dir)
-    frontend_cmd = [
+    frontend_cmd = [ # 前端静态服务命令
         sys.executable,
         "-m",
         "http.server",
@@ -40,11 +40,11 @@ def main(argv: Sequence[str]) -> int:
 
     # 跨平台进程创建：Windows使用start_new_session，Unix使用setsid
     if os.name == 'nt':  # Windows系统
-        backend = subprocess.Popen(backend_cmd, cwd=root, env=env, start_new_session=True)
-        frontend = subprocess.Popen(frontend_cmd, cwd=root, env=env, start_new_session=True)
+        backend = subprocess.Popen(backend_cmd, cwd=root, env=env, start_new_session=True) # 启动后端
+        frontend = subprocess.Popen(frontend_cmd, cwd=root, env=env, start_new_session=True) # 启动前端
     else:  # Unix/Linux系统
-        backend = subprocess.Popen(backend_cmd, cwd=root, env=env, preexec_fn=os.setsid)
-        frontend = subprocess.Popen(frontend_cmd, cwd=root, env=env, preexec_fn=os.setsid)
+        backend = subprocess.Popen(backend_cmd, cwd=root, env=env, preexec_fn=os.setsid) # 启动后端
+        frontend = subprocess.Popen(frontend_cmd, cwd=root, env=env, preexec_fn=os.setsid) # 启动前端
 
     stopping = False
 
@@ -58,10 +58,10 @@ def main(argv: Sequence[str]) -> int:
             try:
                 if os.name == 'nt':  # Windows系统
                     # Windows不支持进程组，直接终止进程
-                    p.terminate()
+                    p.terminate() # 终止子进程
                 else:  # Unix/Linux系统
                     # 发送信号给整个进程组
-                    os.killpg(os.getpgid(p.pid), signal.SIGTERM)
+                    os.killpg(os.getpgid(p.pid), signal.SIGTERM) # 终止进程组
             except Exception:
                 pass
 

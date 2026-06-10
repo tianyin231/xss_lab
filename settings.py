@@ -6,7 +6,7 @@
 """
 
 SYSTEM_NAME = "XSS漏洞自动化挖掘工具"
-SYSTEM_VERSION = "0.1.0"
+SYSTEM_VERSION = "2.2.0"
 
 HOST = "127.0.0.1"
 PORT = 5001
@@ -46,6 +46,15 @@ SELENIUM_TIMEOUT = 20
 SELENIUM_WAIT_SECONDS = 2
 
 AI_ENABLED = True
+
+# AI_PROVIDER = "kimi"
+# AI_MODEL = "moonshot-v1-32k"
+# AI_API_KEY = "sk-7l7vPBH1mqWY8a5DmtoxcfNyvxyghFqvrQZpQpSxVuwXacmD"
+# AI_BASE_URL = "https://api.moonshot.cn/v1"
+AI_PROVIDER = "deepseek"
+AI_MODEL = "deepseek-v4-flash"
+AI_API_KEY = "sk-c269ff51d1eb4568a8a870410720ab90"
+AI_BASE_URL = "https://api.deepseek.com"
 
 # AI API Key 相关说明占位
 

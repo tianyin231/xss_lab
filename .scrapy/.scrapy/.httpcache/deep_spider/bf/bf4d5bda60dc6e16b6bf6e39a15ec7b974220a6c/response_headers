@@ -1,0 +1,27 @@
+Content-Length: 18543
+Server: Tengine
+Content-Type: text/html; charset=UTF-8
+Strict-Transport-Security: max-age=86400
+Accept-Ch: 
+Accept-Ranges: bytes
+Cache-Control: s-maxage=18000, must-revalidate, max-age=0
+Content-Encoding: gzip
+Content-Language: zh-Hans-CN
+Date: Sat, 06 Jun 2026 05:37:11 GMT
+Last-Modified: Sat, 06 Jun 2026 05:37:11 GMT
+Mc-Cache: HIT prts.wiki
+Mc-Cache-Hits: 1
+Mc-Cache-Id: 403243677 351633458
+Vary: Accept-Encoding, Cookie, User-Agent
+Via: 0.0 Caddy, 1.1 fd4e9a4067a5 (Varnish/7.5), cache28.l2cn2601[66,66,200-0,M], cache56.l2cn2601[68,0], cache13.cn3264[90,90,200-0,M], cache18.cn3264[92,0]
+X-Content-Type-Options: nosniff
+X-Powered-By: PHP/8.1.33
+X-Request-Id: a2a1f1f1e91450b28ff159ef
+Age: 12757
+Ali-Swift-Global-Savetime: 1780736989
+X-Cache: MISS TCP_MISS dirn:12:484788434
+X-Swift-Savetime: Sat, 06 Jun 2026 09:09:49 GMT
+X-Swift-Cachetime: 18000
+Alt-Svc: h3=":443"; ma=2592000,h3-29=":443"; ma=2592000
+Timing-Allow-Origin: *
+Eagleid: 7ceef22617807369889748691e

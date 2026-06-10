@@ -1,0 +1,23 @@
+Content-Length: 1385
+Server: Tengine
+Content-Type: text/plain; charset=utf-8
+Strict-Transport-Security: max-age=86400
+Accept-Ranges: bytes
+Cache-Control: max-age=315360000
+Content-Encoding: gzip
+Date: Thu, 30 Apr 2026 06:51:54 GMT
+Etag: "di5f3coj9ts02hv-gzip"
+Last-Modified: Wed, 29 Apr 2026 06:16:21 GMT
+Mc-Cache: HIT prts.wiki
+Mc-Cache-Hits: 375
+Mc-Cache-Id: 1853704101 3312081
+Vary: Accept-Encoding
+Via: 1.1 1538b798a413 (Varnish/7.5), cache11.l2cn2601[0,0,200-0,H], cache44.l2cn2601[1,0], cache6.cn3264[23,23,200-0,M], cache18.cn3264[25,0]
+Age: 251502
+Ali-Swift-Global-Savetime: 1780485465
+X-Cache: MISS TCP_MISS dirn:11:412250262
+X-Swift-Savetime: Sat, 06 Jun 2026 09:09:27 GMT
+X-Swift-Cachetime: 315108498
+Alt-Svc: h3=":443"; ma=2592000,h3-29=":443"; ma=2592000
+Timing-Allow-Origin: *
+Eagleid: 7ceef22617807369676975506e

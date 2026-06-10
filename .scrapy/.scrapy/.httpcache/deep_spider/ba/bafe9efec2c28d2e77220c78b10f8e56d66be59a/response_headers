@@ -1,0 +1,24 @@
+Server: Tengine
+Content-Type: text/html; charset=UTF-8
+Strict-Transport-Security: max-age=86400
+Accept-Ch: 
+Accept-Ranges: bytes
+Cache-Control: s-maxage=18000, must-revalidate, max-age=0
+Content-Encoding: gzip
+Content-Language: zh-Hans-CN
+Date: Sat, 06 Jun 2026 09:09:56 GMT
+Last-Modified: Sat, 06 Jun 2026 09:09:55 GMT
+Mc-Cache: MISS prts.wiki
+Vary: Accept-Encoding, Cookie, User-Agent
+Via: 0.0 Caddy, 1.1 fd4e9a4067a5 (Varnish/7.5), cache13.l2cn2601[970,970,200-0,M], cache55.l2cn2601[972,0], cache29.cn3264[993,993,200-0,M], cache12.cn3264[995,0]
+X-Content-Type-Options: nosniff
+X-Powered-By: PHP/8.1.33
+X-Request-Id: 2eda65badf922344c3cf6763
+Age: 0
+Ali-Swift-Global-Savetime: 1780736996
+X-Cache: MISS TCP_MISS dirn:12:34875875
+X-Swift-Savetime: Sat, 06 Jun 2026 09:09:56 GMT
+X-Swift-Cachetime: 18000
+Alt-Svc: h3=":443"; ma=2592000,h3-29=":443"; ma=2592000
+Timing-Allow-Origin: *
+Eagleid: 7ceef22017807369955461706e

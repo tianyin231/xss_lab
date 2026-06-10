@@ -31,8 +31,8 @@ class AIModelAPI:
         if not self.api_key:
             raise RuntimeError("AI_API_KEY is not configured")
 
-        prompt = self._build_analysis_prompt(html, test_result)
-        return self._call_chat_completions(prompt)
+        prompt = self._build_analysis_prompt(html, test_result) # 构造分析提示词
+        return self._call_chat_completions(prompt) # 调用模型分析
 
     def explain_workbench(
         self,
@@ -45,8 +45,8 @@ class AIModelAPI:
         if not self.api_key:
             raise RuntimeError("AI_API_KEY is not configured")
 
-        prompt = self._build_workbench_explanation_prompt(page_context, report_context, audience)
-        result = self._call_chat(prompt, system_content="你是一位擅长解释 XSS 验证结果的安全讲解员。")
+        prompt = self._build_workbench_explanation_prompt(page_context, report_context, audience) # 构造解释提示词
+        result = self._call_chat(prompt, system_content="你是一位擅长解释 XSS 验证结果的安全讲解员。") # 调用模型解释
         return {
             "success": True,
             "explanation": {
@@ -67,8 +67,8 @@ class AIModelAPI:
         if not self.api_key:
             raise RuntimeError("AI_API_KEY is not configured")
 
-        prompt = self._build_validation_plan_prompt(page_context, candidates, mode)
-        result = self._call_chat(prompt, system_content="你是一位擅长设计安全验证策略的 XSS 分析助手。")
+        prompt = self._build_validation_plan_prompt(page_context, candidates, mode) # 构造验证计划提示词
+        result = self._call_chat(prompt, system_content="你是一位擅长设计安全验证策略的 XSS 分析助手。") # 调用模型选轮次
         return {
             "success": True,
             "plan": {
@@ -89,11 +89,11 @@ class AIModelAPI:
         if not self.api_key:
             raise RuntimeError("AI_API_KEY is not configured")
 
-        prompt = self._build_payload_generation_prompt(finding_context, page_html, mode)
+        prompt = self._build_payload_generation_prompt(finding_context, page_html, mode) # 构造 payload 提示词
         result = self._call_chat(
             prompt,
             system_content="你是一位精通 XSS 漏洞利用与防御的安全专家，擅长根据页面上下文生成精准的验证 Payload。",
-        )
+        ) # 调用模型生成 payload
         return {
             "success": True,
             "payloads": {
@@ -146,15 +146,27 @@ class AIModelAPI:
     def _build_analysis_prompt(self, html: str, test_result: Dict[str, Any]) -> str:
         snippet = html[:4000] if html else ""
         return (
-            "你是一位网络安全专家，负责复核 XSS 扫描结果。\n\n"
-            "请基于页面 HTML 和扫描发现，输出简洁但具体的分析报告，至少包含：\n"
-            "1. 总结\n"
-            "2. 测试准确性判断\n"
-            "3. 可能的误报或漏报\n"
-            "4. 风险评估\n"
-            "5. 修复或改进建议\n\n"
-            f"HTML 片段:\n{snippet}\n\n"
-            f"扫描结果:\n{json.dumps(test_result, ensure_ascii=False, indent=2)}"
+            "你是一名负责复核 XSS 自动化扫描系统结果的安全专家。请基于页面 HTML、静态发现、"
+            "页面输入面、动态验证结果、成功 payload 和系统给出的分析指导进行综合判断。\n\n"
+            "重要判断原则：\n"
+            "1. 不要只根据单个静态 finding 判断误报。静态 finding 可以是风险线索，不一定等于最终漏洞结论。\n"
+            "2. 如果 dynamic_verifications 中存在 status=verified，或 successful_payloads 非空，应优先采纳动态验证证据，"
+            "认为系统已经获得较高置信度的验证结果。\n"
+            "3. 只有在明确证明某个 finding 与用户可控输入无关、不可达、或已经被当前上下文安全编码处理时，才把它判为误报。\n"
+            "4. 请区分三个层次：单条静态发现是否准确、页面整体是否存在 XSS 风险、系统整体检测流程是否有效。\n"
+            "5. 对系统准确性的评价要结合多阶段流程：爬虫采集、静态规则、AST 污点分析、动态 payload 验证。"
+            "如果动态验证支持风险，应明确说明该机制提高了判断准确率。\n"
+            "6. 如果没有动态验证命中，也不要直接说系统准确率低；应说明当前证据不足、需要继续复测的向量和 payload。\n\n"
+            "请按以下结构输出中文报告：\n"
+            "1. 总结：用 2-4 句话说明页面风险和系统判断结果。\n"
+            "2. 系统准确性评价：说明静态分析、AST 分析、动态验证各自贡献；如有动态验证命中，应给出较高置信度评价。\n"
+            "3. 静态发现复核：逐类说明 finding 的意义，避免把风险线索简单等同于误报。\n"
+            "4. 动态验证复核：说明 payload、vector、参数、回显上下文、是否 verified。\n"
+            "5. 误报与漏报分析：分别说明哪些是明确误报、哪些只是待复核信号、是否存在漏报可能。\n"
+            "6. 风险评估：给出 high/medium/low 或 confirmed/suspected/not_triggered 级别，并说明依据。\n"
+            "7. 修复或改进建议：面向开发者给出具体建议。\n\n"
+            f"页面 HTML 片段:\n{snippet}\n\n"
+            f"扫描与验证上下文:\n{json.dumps(test_result, ensure_ascii=False, indent=2)}"
         )
 
     def _build_workbench_explanation_prompt(
@@ -202,7 +214,7 @@ class AIModelAPI:
         )
 
     def _call_chat_completions(self, prompt: str) -> Dict[str, Any]:
-        content = self._call_chat(prompt, system_content="你是一位网络安全专家，精通 XSS 漏洞分析。")
+        content = self._call_chat(prompt, system_content="你是一位网络安全专家，精通 XSS 漏洞分析。") # 统一走聊天接口
         return {
             "success": True,
             "analysis": {
@@ -237,12 +249,12 @@ class AIModelAPI:
                 f"{self.base_url}/chat/completions",
                 headers=headers,
                 json=payload,
-            )
+            ) # 请求 OpenAI 兼容接口
 
-        response.raise_for_status()
-        api_response = response.json()
+        response.raise_for_status() # 非 2xx 直接报错
+        api_response = response.json() # 解析模型响应
         return api_response["choices"][0]["message"]["content"]
 
 
 def get_ai_analyzer(model: Optional[str] = None) -> AIModelAPI:
-    return AIModelAPI(model)
+    return AIModelAPI(model) # 创建底层 AI API 客户端

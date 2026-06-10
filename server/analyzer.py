@@ -106,7 +106,7 @@ def analyze_html(html: str) -> Iterable[StaticFinding]:
         add(
             "inline_event_handler",
             severity,
-            "内联事件处理器风险",
+            "内联事件处理器风险", # onclick/onload 等事件属性
             match.group(0),
             _line_of_offset(html, match.start()),
             match.group("attr"),
@@ -125,13 +125,13 @@ def analyze_html(html: str) -> Iterable[StaticFinding]:
     source_hits: list[tuple[str, int, str]] = []
     for source_key, pattern, label in SOURCE_PATTERNS:
         for match in re.finditer(pattern, html, re.I):
-            source_hits.append((source_key, _line_of_offset(html, match.start()), label))
+            source_hits.append((source_key, _line_of_offset(html, match.start()), label)) # 记录 Source
 
     for sink_name, default_severity, pattern, title in SINK_PATTERNS:
         for match in re.finditer(pattern, html, re.I):
             severity = "high" if source_hits and default_severity != "high" else default_severity
             add(
-                "dom_sink",
+                "dom_sink", # 记录危险 Sink
                 severity,
                 title,
                 _extract_snippet(html, match.start(), match.end()),
@@ -149,7 +149,7 @@ def analyze_html(html: str) -> Iterable[StaticFinding]:
     if source_hits and any(f.kind == "dom_sink" for f in findings):
         first_line = source_hits[0][1]
         source_labels = ", ".join(dict.fromkeys(label for _, _, label in source_hits))
-        add("source_sink_flow", "high", "DOM XSS 数据流风险", source_labels, first_line, "source+sink")
+        add("source_sink_flow", "high", "DOM XSS 数据流风险", source_labels, first_line, "source+sink") # Source + Sink 风险
 
     for match in re.finditer(r"location\.(href|replace|assign)\s*=", html, re.I):
         add(
@@ -175,7 +175,7 @@ def _line_of_offset(text: str, offset: int) -> int:
 
 
 def _analyze_script_flows(html: str, add) -> None:
-    _ast_analyze(html, add)
+    _ast_analyze(html, add) # 调用 AST 污点分析
 
 
 def _split_statements(script: str) -> list[tuple[str, int]]:

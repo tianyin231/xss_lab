@@ -1267,6 +1267,17 @@ html.workbench-page body.workbench-body {
   margin: 0;
 }
 
+.finding-note-input {
+  width: 100%;
+  min-height: 82px;
+  margin-top: 10px;
+  resize: vertical;
+}
+
+.finding-note-save {
+  margin-top: 8px;
+}
+
 .muted-inline {
   font-size: 12px;
   color: rgba(15, 23, 42, 0.6);

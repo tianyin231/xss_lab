@@ -7,8 +7,8 @@ from __future__ import annotations
 import multiprocessing as mp
 from typing import Any
 
-_OUT_QUEUE: mp.Queue | None = None
-_STOP_EVENT: mp.Event | None = None
+_OUT_QUEUE: mp.Queue | None = None # 变量名: 类型 | None = 默认值
+_STOP_EVENT: mp.Event | None = None # 联合类型运算符
 
 
 def init_worker(out_queue: mp.Queue, stop_event: mp.Event) -> None:
@@ -20,7 +20,7 @@ def init_worker(out_queue: mp.Queue, stop_event: mp.Event) -> None:
 def push_event(job_id: str, type: str, data: dict[str, Any]) -> None:
     if _OUT_QUEUE is None:
         return
-    _OUT_QUEUE.put({"job_id": job_id, "type": type, "data": data})
+    _OUT_QUEUE.put({"job_id": job_id, "type": type, "data": data}) # 发给 Runner 消费
 
 
 def get_stop_requested() -> bool:

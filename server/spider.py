@@ -68,8 +68,8 @@ class DeepSpider(Spider):
         )
 
     def start_requests(self) -> Iterable[scrapy.Request]:
-        push_event(self.job_id, "log", {"message": f"start: {self.target_url}"})
-        yield scrapy.Request(self.target_url, callback=self.parse, dont_filter=True, meta={"depth": 0})
+        push_event(self.job_id, "log", {"message": f"start: {self.target_url}"}) # 推送开始日志
+        yield scrapy.Request(self.target_url, callback=self.parse, dont_filter=True, meta={"depth": 0}) # 发起首个请求
 
     def parse(self, response: scrapy.http.Response, **kwargs: Any) -> Iterable[Any]:
         if get_stop_requested():
@@ -96,13 +96,13 @@ class DeepSpider(Spider):
                 "content": content,  # 保存HTML源码
                 "sha256": sha256,
             },
-        )
+        ) # 回传页面结果
 
         is_html = "text/html" in content_type.lower()
         if is_html:
             text = _safe_decode(response)
             findings_count = 0
-            for f in analyze_html(text):
+            for f in analyze_html(text): # 静态分析 HTML
                 findings_count += 1
                 push_event(
                     self.job_id,
@@ -114,7 +114,7 @@ class DeepSpider(Spider):
                         "title": f.title,
                         "evidence": f.evidence,
                     },
-                )
+                ) # 回传风险点
             if findings_count > 0:
                 push_event(self.job_id, "log", {"message": f"分析完成: {response.url}, 发现 {findings_count} 个潜在风险点"})
         else:
@@ -128,7 +128,7 @@ class DeepSpider(Spider):
         if depth >= self.max_depth:
             return
 
-        links = self._link_extractor.extract_links(response)
+        links = self._link_extractor.extract_links(response) # 提取同域链接
         for link in links:
             if get_stop_requested():
                 return
@@ -139,7 +139,7 @@ class DeepSpider(Spider):
                 callback=self.parse,
                 dont_filter=False,
                 meta={"depth": depth + 1},
-            )
+            ) # 继续爬下一层
 
 
 _HTTP_RE = re.compile(r"^https?://", re.IGNORECASE)

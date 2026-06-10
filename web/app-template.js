@@ -364,6 +364,8 @@ export const APP_TEMPLATE = `
                           </select>
                           <span class="muted-inline">{{ selectedFinding.review_status_label || '待处理' }}</span>
                         </div>
+                        <textarea class="input finding-note-input" v-model="selectedFinding.review_note" rows="3" placeholder="填写人工备注"></textarea>
+                        <button class="tableActionBtn finding-note-save" @click="updateFindingStatus(selectedFinding.review_status || 'open', selectedFinding.review_note || '')">保存备注</button>
                       </div>
                       <div class="modal-section" v-if="selectedFinding.summary">
                         <div class="modal-label">聚合总结</div>

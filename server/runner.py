@@ -40,8 +40,8 @@ class JobRunner:
             status=JobStatus.queued.value,
         )
         db.session.add(job)
-        db.session.commit()
-        self._bus.publish(job_id, "job", {"status": job.status})
+        db.session.commit() # 保存任务
+        self._bus.publish(job_id, "job", {"status": job.status}) # 推送任务状态
         return job_id
 
     def start_job(self, job_id: str) -> None:
@@ -61,7 +61,7 @@ class JobRunner:
             out_queue: mp.Queue = mp.Queue()
             stop_event = mp.Event()
             proc = mp.Process(
-                target=run_worker,
+                target=run_worker, # 运行 Scrapy
                 args=(
                     parse_job_spec(
                         {
@@ -71,7 +71,7 @@ class JobRunner:
                             "max_pages": job.max_pages,
                             "use_selenium": job.use_selenium,
                         }
-                    ),
+                    ), # 生成 worker 参数
                     out_queue,
                     stop_event,
                 ),
@@ -80,11 +80,11 @@ class JobRunner:
             self._procs[job_id] = proc
             self._stop[job_id] = stop_event
 
-            t = threading.Thread(target=self._consume_events, args=(app, job_id, out_queue), daemon=True)
+            t = threading.Thread(target=self._consume_events, args=(app, job_id, out_queue), daemon=True) # 消费线程读取状态
             t.start()
 
-            proc.start()
-            self._bus.publish(job_id, "job", {"status": JobStatus.running.value})
+            proc.start() # 启动 worker
+            self._bus.publish(job_id, "job", {"status": JobStatus.running.value}) # 通知前端运行中
 
     def stop_job(self, job_id: str) -> None:
         with self._lock:
@@ -114,7 +114,7 @@ class JobRunner:
         with app.app_context():
             while True:
                 try:
-                    msg: dict[str, Any] = out_queue.get(timeout=0.5)
+                    msg: dict[str, Any] = out_queue.get(timeout=0.5) # 读取 worker 回传消息
                 except Exception:
                     pending_writes = self._flush_writes(pending_writes)
                     proc = self._procs.get(job_id)
@@ -129,17 +129,17 @@ class JobRunner:
                 data = dict(msg.get("data") or {})
 
                 if msg_type == "page":
-                    pending_writes += self._persist_page(job_id, data)
+                    pending_writes += self._persist_page(job_id, data) # 写入 Page 表
                 elif msg_type == "finding":
-                    pending_writes += self._persist_finding(job_id, data)
+                    pending_writes += self._persist_finding(job_id, data) # 写入 Finding 表
                 elif msg_type == "log":
                     pending_writes += self._persist_log(job_id, data)
-                    self._bus.publish(job_id, "log", data)
+                    self._bus.publish(job_id, "log", data) # 推送前端日志
                 elif msg_type == "error":
                     pending_writes += self._persist_log(job_id, {"message": f"ERROR: {data.get('message')}"})
                     pending_writes = self._flush_writes(pending_writes)
-                    self._bus.publish(job_id, "error", data)
-                    self._finalize_if_needed(job_id=job_id, status=JobStatus.failed.value, error=data.get("message"))
+                    self._bus.publish(job_id, "error", data) # 推送错误
+                    self._finalize_if_needed(job_id=job_id, status=JobStatus.failed.value, error=data.get("message")) # 标记失败
                     return
                 elif msg_type == "done":
                     pending_writes += self._persist_log(job_id, {"message": "done"})
@@ -147,13 +147,13 @@ class JobRunner:
                     self._bus.publish(job_id, "log", {"message": "done"})
                     if get_bool("DYNAMIC_VERIFY_ENABLED", False):
                         try:
-                            run_dynamic_verification(
+                            run_dynamic_verification( # 动态验证
                                 job_id,
                                 log=lambda message: self._persist_dynamic_log(job_id, message),
                             )
                         except Exception as exc:
                             self._persist_dynamic_log(job_id, f"[动态验证] 执行失败: {exc}")
-                    self._finalize_if_needed(job_id=job_id, status=JobStatus.finished.value, error=None)
+                    self._finalize_if_needed(job_id=job_id, status=JobStatus.finished.value, error=None) # 标记完成
                     return
                 else:
                     pending_writes += self._persist_log(job_id, data)
@@ -171,7 +171,7 @@ class JobRunner:
             content=data.get("content") or None,  # 保存HTML源码
             sha256=str(data.get("sha256") or "") or None,
         )
-        db.session.add(page)
+        db.session.add(page) # 保存页面
         return 1
 
     def _persist_finding(self, job_id: str, data: dict[str, Any]) -> int:
@@ -183,7 +183,7 @@ class JobRunner:
             title=str(data.get("title") or "Finding"),
             evidence=str(data.get("evidence") or ""),
         )
-        db.session.add(finding)
+        db.session.add(finding) # 保存风险点
         return 1
 
     def _persist_log(self, job_id: str, data: dict[str, Any]) -> int:
@@ -194,18 +194,18 @@ class JobRunner:
             job_id=job_id,
             message=msg,
         )
-        db.session.add(log)
+        db.session.add(log) # 保存日志
         return 1
 
     def _persist_dynamic_log(self, job_id: str, message: str) -> None:
-        pending_writes = self._persist_log(job_id, {"message": message})
-        self._flush_writes(pending_writes)
-        self._bus.publish(job_id, "log", {"message": message})
+        pending_writes = self._persist_log(job_id, {"message": message}) # 写入动态验证日志
+        self._flush_writes(pending_writes) # 立即提交
+        self._bus.publish(job_id, "log", {"message": message}) # 推送前端
 
     def _flush_writes(self, pending_writes: int) -> int:
         if pending_writes <= 0:
             return 0
-        db.session.commit()
+        db.session.commit() # 批量提交
         return 0
 
     def _finalize_if_needed(self, job_id: str, status: str, error: str | None) -> None:
@@ -217,8 +217,8 @@ class JobRunner:
         job.status = status
         job.error = error
         job.finished_at = datetime.utcnow()
-        db.session.commit()
-        self._bus.publish(job_id, "job", {"status": job.status, "error": job.error})
+        db.session.commit() # 保存最终状态
+        self._bus.publish(job_id, "job", {"status": job.status, "error": job.error}) # 推送任务结束
 
 
 _bus = EventBus()

@@ -120,7 +120,7 @@ def run_dynamic_verification(job_id: str, log: Callable[[str], None] | None = No
     if not get_bool("DYNAMIC_VERIFY_ENABLED", False):
         return 0
 
-    job = Job.query.get(job_id)
+    job = Job.query.get(job_id) # 读取任务配置
     pages = (
         Page.query.filter_by(job_id=job_id)
         .filter(Page.content.isnot(None))
@@ -129,10 +129,10 @@ def run_dynamic_verification(job_id: str, log: Callable[[str], None] | None = No
         .all()
     )
     if not pages:
-        _emit(log, "[动态验证] 未找到可验证页面")
+        _emit(log, "[动态验证] 未找到可验证页面") # 输出验证日志
         return 0
 
-    findings = Finding.query.filter_by(job_id=job_id).all()
+    findings = Finding.query.filter_by(job_id=job_id).all() # 读取静态发现
     findings_by_url: dict[str, list[Finding]] = {}
     for finding in findings:
         findings_by_url.setdefault(finding.url, []).append(finding)
@@ -143,25 +143,25 @@ def run_dynamic_verification(job_id: str, log: Callable[[str], None] | None = No
     ssl_verify = get_bool("DYNAMIC_VERIFY_SSL_VERIFY", False)
     use_selenium = get_bool("DYNAMIC_VERIFY_USE_SELENIUM", False) or bool(job.use_selenium if job else False)
 
-    DynamicVerification.query.filter_by(job_id=job_id).delete()
+    DynamicVerification.query.filter_by(job_id=job_id).delete() # 清理旧结果
     db.session.commit()
 
     engine_name = "selenium" if use_selenium else "http"
     _emit(log, f"[动态验证] 开始验证，共 {len(pages)} 个页面，使用 {engine_name} 引擎")
     records: list[VerificationRecord] = []
-    driver = _init_driver(timeout) if use_selenium else None
+    driver = _init_driver(timeout) if use_selenium else None # 可选浏览器验证
     try:
         with httpx.Client(timeout=timeout, follow_redirects=True, trust_env=trust_env, verify=ssl_verify) as client:
             for page in pages:
                 if not page.url.lower().startswith(("http://", "https://")):
                     continue
                 page_findings = findings_by_url.get(page.url, [])
-                vectors = _plan_verification_vectors(page, page_findings)
-                suggested_payloads = suggest_payloads_for_page(page, page_findings)
+                vectors = _plan_verification_vectors(page, page_findings) # 选择验证向量
+                suggested_payloads = suggest_payloads_for_page(page, page_findings) # 推荐 payload
                 _emit(log, f"[动态验证] 页面 {page.url} 计划验证向量: {', '.join(vectors) if vectors else 'none'}")
                 if "query" in vectors:
                     records.extend(
-                        _verify_query(
+                        _verify_query( # 验证 URL 参数
                             client,
                             driver,
                             page,
@@ -171,7 +171,7 @@ def run_dynamic_verification(job_id: str, log: Callable[[str], None] | None = No
                     )
                 if "form" in vectors:
                     records.extend(
-                        _verify_forms(
+                        _verify_forms( # 验证表单输入
                             client,
                             driver,
                             page,
@@ -181,7 +181,7 @@ def run_dynamic_verification(job_id: str, log: Callable[[str], None] | None = No
                     )
                 if "hash" in vectors:
                     records.extend(
-                        _verify_hash_runtime(
+                        _verify_hash_runtime( # 验证 hash 片段
                             client,
                             driver,
                             page,
@@ -214,10 +214,10 @@ def run_dynamic_verification(job_id: str, log: Callable[[str], None] | None = No
                         reflection_context=record.reflection_context,
                         reflection_snippet=record.reflection_snippet,
                         context_hint=record.context_hint,
-                    ),
+                    ), # 打包验证证据
                 )
             )
-    db.session.commit()
+    db.session.commit() # 保存动态验证结果
     verified_count = sum(1 for item in records if item.status == "verified")
     _emit(log, f"[动态验证] 完成，共生成 {len(records)} 条结果，已触发 {verified_count} 条")
     return len(records)
@@ -393,7 +393,7 @@ def run_ai_multi_round_validation(
             payload=str(round_item.get("payload") or ""),
             vector=str(round_item.get("vector") or ""),
             use_selenium=use_selenium,
-        )
+        ) # 执行单轮页面复测
         outputs.append(
             {
                 "round_index": index,
@@ -514,8 +514,8 @@ def _verify_query(
                 urlencode(mutated, doseq=True),
                 split_result.fragment,
             )
-        )
-        records.append(_request_and_check(client, driver, page, target_url, "query", name, payload, method="get", wait_seconds=wait_seconds))
+        ) # 构造带 payload 的 URL
+        records.append(_request_and_check(client, driver, page, target_url, "query", name, payload, method="get", wait_seconds=wait_seconds)) # 请求并判断
     return records
 
 
@@ -525,7 +525,7 @@ def _verify_forms(
     if not page.content:
         return []
     try:
-        document = lxml_html.fromstring(page.content)
+        document = lxml_html.fromstring(page.content) # 解析表单
     except Exception:
         return []
 
@@ -559,7 +559,7 @@ def _verify_forms(
                 data=form_data,
                 wait_seconds=wait_seconds,
             )
-        )
+        ) # 提交表单并判断
     return records
 
 
@@ -710,10 +710,10 @@ def _collect_browser_result(
     driver: webdriver.Remote,
     wait_seconds: float,
 ) -> tuple[str, str | None, str | None]:
-    _wait_for_browser_idle(driver, wait_seconds)
+    _wait_for_browser_idle(driver, wait_seconds) # 等待页面稳定
     alert_text = None
     try:
-        alert = driver.switch_to.alert
+        alert = driver.switch_to.alert # 捕获 alert
         alert_text = str(alert.text or "").strip() or None
         alert.accept()
     except NoAlertPresentException:
@@ -725,7 +725,7 @@ def _collect_browser_result(
     current_url = None
     try:
         dom_text = str(
-            driver.execute_script("return document.documentElement ? document.documentElement.outerHTML : '';")
+            driver.execute_script("return document.documentElement ? document.documentElement.outerHTML : '';") # 读取 DOM
             or ""
         )
     except Exception:
@@ -749,11 +749,11 @@ def _submit_with_driver(
     wait_seconds: float,
 ) -> tuple[str, str | None, str | None]:
     if method.lower() == "get":
-        driver.get(target_url)
-        return _collect_browser_result(driver, wait_seconds)
+        driver.get(target_url) # 浏览器访问目标 URL
+        return _collect_browser_result(driver, wait_seconds) # 收集浏览器结果
 
-    driver.get(page_url)
-    _wait_for_browser_idle(driver, min(wait_seconds, 1.0))
+    driver.get(page_url) # 先打开原页面
+    _wait_for_browser_idle(driver, min(wait_seconds, 1.0)) # 等待表单环境
     payload_data = dict(data or {})
     driver.execute_script(
         """
@@ -777,8 +777,8 @@ def _submit_with_driver(
         target_url,
         method.lower(),
         payload_data,
-    )
-    return _collect_browser_result(driver, wait_seconds)
+    ) # 注入隐藏表单并提交
+    return _collect_browser_result(driver, wait_seconds) # 收集提交后结果
 
 
 def _classify_runtime_result(
@@ -803,8 +803,8 @@ def _classify_runtime_result(
             start = max(0, idx - 80)
             end = min(len(text), idx + len(candidate) + 80)
             snippet = text[start:end].replace("\n", " ")
-            context = _guess_reflection_context(text, idx, len(candidate))
-            hint = _context_hint(context)
+            context = _guess_reflection_context(text, idx, len(candidate)) # 判断回显上下文
+            hint = _context_hint(context) # 生成上下文提示
             if alert_text:
                 hint = f"{hint} 同时浏览器还出现了弹窗信号：{alert_text}"
             return "verified", snippet, True, context, snippet, hint
@@ -841,19 +841,19 @@ def _request_and_check(
                 method,
                 data,
                 wait_seconds,
-            )
+            ) # Selenium 请求
             engine = "selenium"
         elif method == "post":
-            response = client.post(target_url, data=data or {})
+            response = client.post(target_url, data=data or {}) # HTTP POST 验证
             text = response.text
             engine = "http"
         else:
-            response = client.get(target_url, params=data or None)
+            response = client.get(target_url, params=data or None) # HTTP GET 验证
             text = response.text
             engine = "http"
         status, evidence, reflection_found, reflection_context, reflection_snippet, context_hint = _classify_runtime_result(
             text, payload, alert_text=alert_text, browser_url=browser_url
-        )
+        ) # 分类验证结果
     except Exception as exc:
         engine = "selenium" if driver is not None else "http"
         status = "error"

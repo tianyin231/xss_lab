@@ -12,7 +12,7 @@ def build_export_filename(job_id: str, export_format: str) -> str:
 
 
 def render_report_json(report_data: dict[str, object]) -> str:
-    return json.dumps(report_data, ensure_ascii=False, indent=2)
+    return json.dumps(report_data, ensure_ascii=False, indent=2) # 导出 JSON
 
 
 def render_report_html(report_data: dict[str, object]) -> str:
@@ -26,12 +26,12 @@ def render_report_html(report_data: dict[str, object]) -> str:
     manual_retest_reports = report_data.get("manual_retest_reports") or []
     ai_multi_round_reports = report_data.get("ai_multi_round_reports") or []
 
-    findings_html = "".join(_render_finding_card(item) for item in findings)
-    verifications_html = "".join(_render_verification_card(item) for item in verifications)
-    ai_reports_html = "".join(_render_ai_card(item) for item in ai_reports)
-    page_workbench_html = "".join(_render_page_workbench_card(item) for item in page_workbenches)
-    manual_retest_html = "".join(_render_runtime_report_card(item, "手工复测报告") for item in manual_retest_reports)
-    ai_multi_round_html = "".join(_render_runtime_report_card(item, "AI 多轮验证报告") for item in ai_multi_round_reports)
+    findings_html = "".join(_render_finding_card(item) for item in findings) # 渲染风险卡片
+    verifications_html = "".join(_render_verification_card(item) for item in verifications) # 渲染验证卡片
+    ai_reports_html = "".join(_render_ai_card(item) for item in ai_reports) # 渲染 AI 卡片
+    page_workbench_html = "".join(_render_page_workbench_card(item) for item in page_workbenches) # 渲染页面工作台
+    manual_retest_html = "".join(_render_runtime_report_card(item, "手工复测报告") for item in manual_retest_reports) # 渲染复测报告
+    ai_multi_round_html = "".join(_render_runtime_report_card(item, "AI 多轮验证报告") for item in ai_multi_round_reports) # 渲染 AI 验证报告
     risk_pages_html = "".join(
         f"<tr><td>{_escape(item.get('url'))}</td>"
         f"<td>{_escape(item.get('findings') or 0)}</td>"
@@ -265,9 +265,9 @@ def _render_page_workbench_card(item: dict[str, object]) -> str:
     repair_suggestions = item.get("repair_suggestions") or []
     latest_manual = item.get("latest_manual_retest_report")
     latest_ai = item.get("latest_ai_multi_round_report")
-    query_tags = _render_tag_list(input_profile.get("query_params") or [])
-    source_tags = _render_tag_list(input_profile.get("source_hints") or [])
-    risk_tags = _render_tag_list(risk_summary.get("risky_api_hints") or [])
+    query_tags = _render_tag_list(input_profile.get("query_params") or []) # Query 参数标签
+    source_tags = _render_tag_list(input_profile.get("source_hints") or []) # Source 线索标签
+    risk_tags = _render_tag_list(risk_summary.get("risky_api_hints") or []) # 风险 API 标签
     query_html = query_tags or '<div class="meta">无显式 query 参数</div>'
     source_html = source_tags or '<div class="meta">无明显 source 线索</div>'
     risk_html = risk_tags or '<div class="meta">暂无明显风险线索</div>'
@@ -455,7 +455,7 @@ def _render_plan_analysis(plan_analysis: dict[str, object]) -> str:
         f'<div class="meta">最强信号：{_escape(plan_analysis.get("strongest_signal_label") or "-")}</div>',
     ]
     if plan_analysis.get("strongest_signal_reason"):
-        parts.append(f'<div class="meta">{_escape(plan_analysis.get("strongest_signal_reason"))}</div>')
+        parts.append(f'<div class="meta">{_escape(plan_analysis.get("strongest_signal_reason"))}</div>') # 输出最强信号原因
     return "".join(parts)
 
 
@@ -473,17 +473,17 @@ def _render_runtime_report_summary(report: dict[str, object] | None, empty_text:
 def _render_optional_pre(label: str, value: object) -> str:
     if value is None or value == "" or value == []:
         return ""
-    return f'<div class="meta" style="margin-top:10px;">{_escape(label)}</div><pre>{_escape(value)}</pre>'
+    return f'<div class="meta" style="margin-top:10px;">{_escape(label)}</div><pre>{_escape(value)}</pre>' # 渲染证据块
 
 
 def _render_tag_list(values: list[object]) -> str:
     if not values:
         return ""
-    return "".join(f'<span class="tag">{_escape(value)}</span>' for value in values if value not in {None, ""})
+    return "".join(f'<span class="tag">{_escape(value)}</span>' for value in values if value not in {None, ""}) # 渲染标签列表
 
 
 def _escape(value: object) -> str:
-    return html.escape(str(value))
+    return html.escape(str(value)) # 防止报告 HTML 注入
 
 
 def _severity_pill_class(severity: str) -> str:

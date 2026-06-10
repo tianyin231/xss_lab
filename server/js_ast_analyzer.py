@@ -130,11 +130,11 @@ def analyze_script_flows(html: str, add: Callable) -> None:
         base_line = html.count("\n", 0, base_offset) + 1
 
         try:
-            ast = esprima.parseScript(body, tolerant=True, loc=True, range=True)
+            ast = esprima.parseScript(body, tolerant=True, loc=True, range=True) # 解析 JS AST
         except Exception:
             continue
 
-        _walk_and_emit(ast, add, base_line, body, html)
+        _walk_and_emit(ast, add, base_line, body, html) # 遍历 AST 并输出发现
 
 
 # ---------------------------------------------------------------------------
@@ -149,7 +149,7 @@ def _walk_and_emit(
     html: str,
 ) -> None:
     tainted_vars: dict[str, TaintInfo] = {}
-    _walk_statements(ast.body, tainted_vars, add, script_base_line, script_body, html)
+    _walk_statements(ast.body, tainted_vars, add, script_base_line, script_body, html) # 从顶层语句开始追踪
 
 
 def _walk_statements(
@@ -162,7 +162,7 @@ def _walk_statements(
 ) -> None:
     for stmt in statements:
         try:
-            _process_statement(stmt, tainted_vars, add, script_base_line, script_body, html)
+            _process_statement(stmt, tainted_vars, add, script_base_line, script_body, html) # 分析单条语句
         except Exception:
             continue
 
@@ -241,16 +241,16 @@ def _handle_assignment(
     script_body: str,
 ) -> None:
     lhs = expr.left
-    rhs_taint = _eval_taint(expr.right, tainted_vars)
+    rhs_taint = _eval_taint(expr.right, tainted_vars) # 判断右侧是否带污点
 
     # 检查 LHS 是否为 Sink
-    sink_label = _get_sink_label(lhs)
+    sink_label = _get_sink_label(lhs) # 判断左侧是否危险 Sink
     if sink_label is not None and rhs_taint is not None:
         _emit_finding(
             add, script_base_line, script_body,
             rhs_taint.source, rhs_taint.path, sink_label,
             expr,
-        )
+        ) # Source 流入 Sink
         return
 
     # LHS 为简单标识符且 RHS 污点 → 更新 tainted_vars
@@ -277,13 +277,13 @@ def _check_call_sink(
     if callee.type == "Identifier":
         key = (None, callee.name)
         if key in _SINK_CALLS and args:
-            taint = _eval_taint(args[0], tainted_vars)
+            taint = _eval_taint(args[0], tainted_vars) # 检查调用参数污点
             if taint is not None:
                 _emit_finding(
                     add, script_base_line, script_body,
                     taint.source, taint.path, callee.name,
                     call_node,
-                )
+                ) # 污点进入函数型 Sink
 
     elif callee.type == "MemberExpression":
         method_name = _get_prop_name(callee)
@@ -293,26 +293,26 @@ def _check_call_sink(
         if method_name and obj_name:
             key = (obj_name, method_name)
             if key in _SINK_CALLS and args:
-                taint = _eval_taint(args[0], tainted_vars)
+                taint = _eval_taint(args[0], tainted_vars) # 检查 document.write 参数
                 if taint is not None:
                     _emit_finding(
                         add, script_base_line, script_body,
                         taint.source, taint.path, f"{obj_name}.{method_name}",
                         call_node,
-                    )
+                    ) # 污点进入成员函数 Sink
 
         # insertAdjacentHTML(pos, x), jQuery .html(x)
         if method_name in _SINK_METHOD_CALLS and args:
             # insertAdjacentHTML 的第二个参数是内容
             target_arg = args[1] if method_name == "insertAdjacentHTML" and len(args) > 1 else args[0]
-            taint = _eval_taint(target_arg, tainted_vars)
+            taint = _eval_taint(target_arg, tainted_vars) # 检查 HTML 写入参数
             if taint is not None:
                 sink_label = _SINK_METHOD_CALLS[method_name]
                 _emit_finding(
                     add, script_base_line, script_body,
                     taint.source, taint.path, sink_label,
                     call_node,
-                )
+                ) # 污点进入 DOM 写入 Sink
 
 
 # ---------------------------------------------------------------------------
@@ -544,9 +544,9 @@ def _emit_finding(
     sink: str,
     node: Any,
 ) -> None:
-    flow_display = _build_flow_display(source, path, sink)
+    flow_display = _build_flow_display(source, path, sink) # 拼接 Source -> Sink 链路
     line = script_base_line + (getattr(node, "loc", None) and node.loc.start.line or 1) - 1
-    snippet = _extract_snippet(script_body, node)
+    snippet = _extract_snippet(script_body, node) # 截取证据代码
     add(
         "ast_data_flow",
         "high",
@@ -560,7 +560,7 @@ def _emit_finding(
             "sink": sink,
             "flow_display": flow_display,
         },
-    )
+    ) # 写入静态发现列表
 
 
 def _build_flow_display(source: str, path: list[str], sink: str) -> str:

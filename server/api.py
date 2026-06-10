@@ -61,7 +61,7 @@ def require_api_auth() -> Response | None:
     if not token:
         return jsonify({"error": "auth required"}), 401
 
-    user = User.query.filter_by(auth_token=token).first()
+    user = User.query.filter_by(auth_token=token).first() # 校验登录状态
     if user is None:
         return jsonify({"error": "invalid token"}), 401
 
@@ -182,8 +182,8 @@ def create_job() -> Response:
         max_depth=max_depth,
         max_pages=max_pages,
         use_selenium=use_selenium,
-    )
-    runner.start_job(job_id)
+    )  # 创建任务
+    runner.start_job(job_id)  # 启动后台扫描
     return jsonify({"job_id": job_id}), 201
 
 
@@ -306,7 +306,7 @@ def get_report(job_id: str) -> Response:
     job: Job | None = db.session.get(Job, job_id)
     if job is None:
         return jsonify({"error": "not found"}), 404
-    return jsonify(_build_report_payload(job))
+    return jsonify(_build_report_payload(job)) # 聚合扫描报告
 
 
 @api_bp.get("/jobs/<job_id>/pages")
@@ -315,7 +315,7 @@ def list_job_pages(job_id: str) -> Response:
     if job is None:
         return jsonify({"error": "not found"}), 404
 
-    pages = Page.query.filter_by(job_id=job_id).order_by(Page.id.desc()).all()
+    pages = Page.query.filter_by(job_id=job_id).order_by(Page.id.desc()).all() # 查询任务页面
     return jsonify(
         {
             "ok": True,
@@ -343,19 +343,19 @@ def export_report(job_id: str) -> Response:
     if export_format not in {"html", "json"}:
         return jsonify({"error": "unsupported format"}), 400
 
-    report_payload = _build_report_payload(job, include_export_details=True)
+    report_payload = _build_report_payload(job, include_export_details=True) # 导出完整报告
     if export_format == "json":
-        body = render_report_json(report_payload)
+        body = render_report_json(report_payload) # 生成 JSON 报告
         mimetype = "application/json; charset=utf-8"
     else:
-        body = render_report_html(report_payload)
+        body = render_report_html(report_payload) # 生成 HTML 报告
         mimetype = "text/html; charset=utf-8"
 
     return Response(
         body,
         mimetype=mimetype,
         headers={
-            "Content-Disposition": f'attachment; filename="{build_export_filename(job.id, export_format)}"'
+            "Content-Disposition": f'attachment; filename="{build_export_filename(job.id, export_format)}"' # 下载文件名
         },
     )
 
@@ -368,7 +368,7 @@ def job_events(job_id: str) -> Response:
         "Connection": "keep-alive",
         "X-Accel-Buffering": "no",
     }
-    return Response(bus.stream(job_id), headers=headers)
+    return Response(bus.stream(job_id), headers=headers)  # SSE 实时推送
 
 
 @api_bp.post("/jobs/<job_id>/analyze")
@@ -390,9 +390,21 @@ def analyze_job(job_id: str) -> Response:
 
     for page in pages:
         page_findings = [f for f in findings if f.url == page.url]
+        page_verifications = (
+            DynamicVerification.query.filter_by(job_id=job_id, page_url=page.url)
+            .order_by(DynamicVerification.id.desc())
+            .limit(30)
+            .all()
+        )
+        input_profile = _build_page_input_profile(page)
+        serialized_verifications = [_serialize_verification(item) for item in page_verifications]
+        successful_payloads = _build_successful_payloads(serialized_verifications)
         test_result = {
             "url": page.url,
             "status_code": page.status_code,
+            "content_type": page.content_type,
+            "input_profile": input_profile,
+            "risk_summary": _build_page_risk_summary(page_findings, page_verifications, input_profile),
             "findings": [
                 {
                     "kind": f.kind,
@@ -402,6 +414,14 @@ def analyze_job(job_id: str) -> Response:
                 }
                 for f in page_findings
             ],
+            "dynamic_verifications": serialized_verifications[:12],
+            "successful_payloads": successful_payloads[:8],
+            "payload_suggestions": suggest_payloads_for_page(page, page_findings)[:8],
+            "analysis_guidance": {
+                "assessment_policy": "请综合静态发现、动态验证和页面输入面判断。静态低危线索不等于误报；它可能是用于后续动态验证的风险信号。若存在 verified 动态验证或 successful_payloads，应优先认为系统已获得较高置信度证据。",
+                "false_positive_policy": "只有在明确证明该 finding 与用户可控输入无关、不可达、或被上下文安全编码处理时，才应判为误报。不要仅因为 finding 类型是 tainted_source、javascript_redirection 或 dom_sink 就直接判为误报。",
+                "accuracy_policy": "评价系统准确率时，应说明系统采用了静态分析、AST 污点分析和动态验证的组合方法；若动态验证结果支持风险，应肯定这种多阶段验证提高了准确性。",
+            },
         }
 
         db.session.add(Log(job_id=job_id, message=f"[AI分析] 开始分析页面：{page.url}"))
@@ -498,7 +518,7 @@ def retest_job_finding(job_id: str) -> Response:
         finding_url=finding_url,
         member_kinds=member_kinds if isinstance(member_kinds, list) else [],
         urls=urls if isinstance(urls, list) else [],
-    )
+    ) # 定位要复测的风险点
     if finding is None and finding_url:
         finding = _build_virtual_finding(
             job_id=job_id,
@@ -507,7 +527,7 @@ def retest_job_finding(job_id: str) -> Response:
             finding_title=finding_title,
             finding_evidence=finding_evidence,
             finding_severity=finding_severity,
-        )
+        ) # 构造临时风险点
     if finding is None:
         return jsonify({"error": "finding not found"}), 404
 
@@ -518,7 +538,7 @@ def retest_job_finding(job_id: str) -> Response:
             payload=custom_payload,
             vector=vector,
             use_selenium=use_selenium,
-        )
+        ) # 单个风险点复测
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
     except Exception as exc:
@@ -532,7 +552,7 @@ def retest_job_finding(job_id: str) -> Response:
             message=f"[单点复测] {finding.title} -> {len(records)} 条结果",
         )
     )
-    _persist_runtime_verifications(job_id, records)
+    _persist_runtime_verifications(job_id, records) # 保存复测结果
     db.session.commit()
 
     return jsonify(
@@ -618,7 +638,7 @@ def retest_job_page(job_id: str) -> Response:
         return jsonify({"error": "page not found"}), 404
 
     batch_id = uuid4().hex
-    strategy = _build_page_retest_strategy(page, Finding.query.filter_by(job_id=job_id, url=page.url).all(), _build_page_input_profile(page))
+    strategy = _build_page_retest_strategy(page, Finding.query.filter_by(job_id=job_id, url=page.url).all(), _build_page_input_profile(page)) # 生成页面复测策略
     try:
         records = retest_page(
             job_id=job_id,
@@ -626,7 +646,7 @@ def retest_job_page(job_id: str) -> Response:
             payload=custom_payload,
             vector=vector,
             use_selenium=use_selenium,
-        )
+        ) # 页面级复测
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
     except Exception as exc:
@@ -646,7 +666,7 @@ def retest_job_page(job_id: str) -> Response:
             if isinstance(strategy.get("preferred_payload"), dict)
             else None,
         },
-    )
+    ) # 保存页面复测结果
     db.session.commit()
     return jsonify(
         {
@@ -787,7 +807,7 @@ def get_page_workbench(job_id: str) -> Response:
         elif item.get("source") not in {"manual_retest", "ai_multi_round"} and len(serialized_dynamic_results) < 20:
             serialized_dynamic_results.append(item)
 
-    input_profile = _build_page_input_profile(page)
+    input_profile = _build_page_input_profile(page) # 提取页面输入面
     return jsonify(
         {
             "ok": True,
@@ -849,12 +869,12 @@ def ai_validate_page_workbench(job_id: str) -> Response:
         "risk_summary": _build_page_risk_summary(findings, [], input_profile),
         "related_findings": _serialize_workbench_findings(findings)[:6],
     }
-    candidates = build_safe_probe_candidates_for_page(page, findings, mode)
-    ai_plan = _recommend_ai_multi_round_plan(page_context, candidates, mode)
+    candidates = build_safe_probe_candidates_for_page(page, findings, mode) # 生成安全探针候选
+    ai_plan = _recommend_ai_multi_round_plan(page_context, candidates, mode) # AI 选择验证轮次
     batch_id = uuid4().hex
 
     try:
-        round_outputs = run_ai_multi_round_validation(job_id, page, ai_plan["rounds"], use_selenium=use_selenium)
+        round_outputs = run_ai_multi_round_validation(job_id, page, ai_plan["rounds"], use_selenium=use_selenium) # 执行多轮验证
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
     except Exception as exc:
@@ -884,14 +904,14 @@ def ai_validate_page_workbench(job_id: str) -> Response:
                 "round_reason": round_item["reason"],
                 "plan_provider": ai_plan["provider"],
             },
-        )
+        ) # 保存每轮验证结果
     db.session.commit()
 
     reports = _build_runtime_reports(
         DynamicVerification.query.filter_by(job_id=job_id, page_url=page.url).order_by(DynamicVerification.id.desc()).all(),
         source="ai_multi_round",
-    )
-    current_report = _select_runtime_report(reports, batch_id)
+    ) # 聚合 AI 验证报告
+    current_report = _select_runtime_report(reports, batch_id) # 取当前批次报告
     return jsonify(
         {
             "ok": True,
@@ -977,11 +997,11 @@ def explain_page_workbench(job_id: str) -> Response:
         .all()
     )
     manual_retests = [item for item in verifications if _parse_dynamic_evidence(item.evidence).get("source") == "manual_retest"]
-    reports = _build_manual_retest_reports(manual_retests)
-    current_report = _select_manual_retest_report(reports, batch_id)
-    compare_report = _select_manual_retest_report(reports, compare_batch_id)
-    input_profile = _build_page_input_profile(page)
-    risk_summary = _build_page_risk_summary(findings, verifications, input_profile)
+    reports = _build_manual_retest_reports(manual_retests) # 聚合手工复测报告
+    current_report = _select_manual_retest_report(reports, batch_id) # 当前报告
+    compare_report = _select_manual_retest_report(reports, compare_batch_id) # 对比报告
+    input_profile = _build_page_input_profile(page) # 页面输入面
+    risk_summary = _build_page_risk_summary(findings, verifications, input_profile) # 页面风险摘要
 
     page_context = {
         "url": page.url,
@@ -996,8 +1016,8 @@ def explain_page_workbench(job_id: str) -> Response:
         "compare_report": compare_report,
     }
 
-    analyzer = get_analyzer()
-    result = analyzer.explain_workbench(page_context, report_context, audience)
+    analyzer = get_analyzer() # 获取 AI 分析器
+    result = analyzer.explain_workbench(page_context, report_context, audience) # 生成解释
     if not result.get("success"):
         db.session.add(Log(job_id=job_id, message=f"[AI解释] 页面解释失败：{page.url} - {result.get('error')}"))
         db.session.commit()
@@ -1077,7 +1097,7 @@ def ai_generate_payload_page(job_id: str) -> Response:
     if target_finding is None:
         return jsonify({"error": "no finding available for payload generation"}), 400
 
-    evidence = _parse_evidence(target_finding.evidence)
+    evidence = _parse_evidence(target_finding.evidence) # 解析静态证据
     finding_context: dict[str, object] = {
         "kind": target_finding.kind,
         "title": target_finding.title,
@@ -1103,8 +1123,8 @@ def ai_generate_payload_page(job_id: str) -> Response:
             finding_context["context_hint"] = detail.get("context_hint")
             break
 
-    analyzer = get_analyzer()
-    result = analyzer.generate_payloads(finding_context, page.content or "", mode)
+    analyzer = get_analyzer() # 获取 AI 分析器
+    result = analyzer.generate_payloads(finding_context, page.content or "", mode) # 生成 payload
     if not result.get("success"):
         db.session.add(Log(job_id=job_id, message=f"[AI生成Payload] 失败：{page.url} - {result.get('error')}"))
         db.session.commit()
@@ -1112,7 +1132,7 @@ def ai_generate_payload_page(job_id: str) -> Response:
 
     ai_content = result["payloads"]["content"]
     try:
-        parsed = json.loads(ai_content)
+        parsed = json.loads(ai_content) # 解析 AI JSON 输出
         generated = parsed.get("payloads") or []
     except (json.JSONDecodeError, TypeError):
         generated = [{"payload": ai_content, "vector": "", "context": "", "reason": "AI 原始输出"}]
@@ -1128,7 +1148,7 @@ def ai_generate_payload_page(job_id: str) -> Response:
         mode=mode,
         payloads_json=json.dumps(generated, ensure_ascii=False),
     )
-    db.session.add(report)
+    db.session.add(report) # 保存 AI payload 历史
     db.session.add(Log(job_id=job_id, message=f"[AI生成Payload] 成功：{page.url} / 模式：{mode} / 生成 {len(generated)} 个 payload"))
     db.session.commit()
 
@@ -1178,16 +1198,16 @@ def get_page_detail(page_id: int) -> Response:
 
 def _build_report_payload(job: Job, include_export_details: bool = False) -> dict[str, object]:
     job_id = job.id
-    pages_count = db.session.query(func.count(Page.id)).filter_by(job_id=job_id).scalar() or 0
-    raw_findings = Finding.query.filter_by(job_id=job_id).order_by(Finding.id.asc()).all()
-    logs = Log.query.filter_by(job_id=job_id).order_by(Log.id.desc()).limit(500).all()
+    pages_count = db.session.query(func.count(Page.id)).filter_by(job_id=job_id).scalar() or 0 # 页面数量
+    raw_findings = Finding.query.filter_by(job_id=job_id).order_by(Finding.id.asc()).all() # 原始风险点
+    logs = Log.query.filter_by(job_id=job_id).order_by(Log.id.desc()).limit(500).all() # 最近日志
     pages_query = Page.query.filter_by(job_id=job_id).order_by(Page.id.desc())
     pages = pages_query.all() if include_export_details else pages_query.limit(100).all()
     verifications = DynamicVerification.query.filter_by(job_id=job_id).order_by(DynamicVerification.id.asc()).all()
     status_records = FindingStatus.query.filter_by(job_id=job_id).all()
     ai_reports = AIReport.query.filter_by(job_id=job_id).order_by(AIReport.id.asc()).all()
 
-    grouped_findings = _build_grouped_findings(raw_findings, verifications, status_records)
+    grouped_findings = _build_grouped_findings(raw_findings, verifications, status_records) # 合并同类风险
     severity_stats = Counter(item["severity"] for item in grouped_findings)
     kind_stats = Counter(item["kind"] for item in grouped_findings)
     page_risk = _top_risk_pages(grouped_findings)
@@ -1196,7 +1216,7 @@ def _build_report_payload(job: Job, include_export_details: bool = False) -> dic
     pages.reverse()
     logs.reverse()
 
-    serialized_verifications = [_serialize_verification(item) for item in verifications]
+    serialized_verifications = [_serialize_verification(item) for item in verifications] # 序列化验证结果
 
     payload = {
         "export_generated_at": _to_beijing_iso(datetime.utcnow()),

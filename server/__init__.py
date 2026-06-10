@@ -30,7 +30,7 @@ def create_app() -> Flask:
             absolute_db_path = os.path.join(root_dir, db_path)
             db_uri = f'sqlite:///{absolute_db_path.replace(chr(92), "/")}'
     
-    _ensure_database_if_needed(db_uri)
+    _ensure_database_if_needed(db_uri) # MySQL 不存在时自动建库
 
     app = Flask(__name__)
     # 根据数据库类型配置引擎选项
@@ -46,19 +46,19 @@ def create_app() -> Flask:
             "max_overflow": get_int("MYSQL_MAX_OVERFLOW", 20),
         })
     
-    app.config.from_mapping(
+    app.config.from_mapping( # 注入 Flask/SQLAlchemy 配置
         SQLALCHEMY_DATABASE_URI=db_uri,
         SQLALCHEMY_TRACK_MODIFICATIONS=False,
         SQLALCHEMY_ENGINE_OPTIONS=engine_options,
     )
 
-    CORS(app, resources={r"/api/*": {"origins": get("CORS_ORIGINS", "*")}})
+    CORS(app, resources={r"/api/*": {"origins": get("CORS_ORIGINS", "*")}}) # 允许前端访问 API
 
-    db.init_app(app)
+    db.init_app(app) # 绑定 ORM
     with app.app_context():
-        db.create_all()
+        db.create_all() # 创建数据表
 
-    app.register_blueprint(api_bp, url_prefix="/api")
+    app.register_blueprint(api_bp, url_prefix="/api") # 注册 API 路由
 
     @app.get("/favicon.ico")
     def _favicon() -> Response:
@@ -86,7 +86,7 @@ def create_app() -> Flask:
 
     return app
 def _db_uri() -> str:
-    v = get("DATABASE_URL", None)
+    v = get("DATABASE_URL", None) # 优先读取显式数据库配置
     if v:
         return str(v)
     return _mysql_uri()
@@ -103,7 +103,7 @@ def _mysql_uri() -> str:
 
 def _ensure_database_if_needed(db_uri: str) -> None:
     try:
-        url = make_url(db_uri)
+        url = make_url(db_uri) # 解析数据库连接串
     except Exception:
         return
 
@@ -115,9 +115,9 @@ def _ensure_database_if_needed(db_uri: str) -> None:
         return
 
     server_url = url.set(database=None)
-    engine = create_engine(server_url)
+    engine = create_engine(server_url) # 连接 MySQL 服务端
     try:
         with engine.begin() as conn:
-            conn.execute(text(f"CREATE DATABASE IF NOT EXISTS `{db_name}` CHARACTER SET utf8mb4"))
+            conn.execute(text(f"CREATE DATABASE IF NOT EXISTS `{db_name}` CHARACTER SET utf8mb4")) # 确保库存在
     finally:
         engine.dispose()

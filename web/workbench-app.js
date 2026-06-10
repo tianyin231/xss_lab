@@ -156,7 +156,7 @@ createApp({
     }
 
     async function fetchJobs() {
-      const res = await fetch(`${apiBase.value}/jobs`)
+      const res = await fetch(`${apiBase.value}/jobs`) // 获取任务列表
       jobs.value = await res.json()
     }
 
@@ -165,7 +165,7 @@ createApp({
         pages.value = []
         return
       }
-      const res = await fetch(`${apiBase.value}/jobs/${jobId}/pages`)
+      const res = await fetch(`${apiBase.value}/jobs/${jobId}/pages`) // 获取任务页面
       const body = await res.json()
       if (!res.ok) throw new Error(body.error || '获取页面列表失败')
       pages.value = body.pages || []
@@ -176,7 +176,7 @@ createApp({
       if (jobId) params.set('job_id', jobId)
       if (pageUrl) params.set('page_url', pageUrl)
       const suffix = params.toString() ? `?${params.toString()}` : ''
-      const res = await fetch(`${apiBase.value}/workbench/url${suffix}`)
+      const res = await fetch(`${apiBase.value}/workbench/url${suffix}`) // 获取工作台地址
       const body = await res.json()
       if (!res.ok) throw new Error(body.error || '获取工作台地址失败')
       return body.url
@@ -191,7 +191,7 @@ createApp({
       workbenchLoading.value = true
       try {
         const endpoint = `${apiBase.value}/jobs/${selectedJobId.value}/pages/workbench?url=${encodeURIComponent(selectedPageUrl.value)}`
-        const res = await fetch(endpoint)
+        const res = await fetch(endpoint) // 获取页面工作台数据
         const body = await res.json()
         if (!res.ok) throw new Error(body.error || '获取工作台数据失败')
         workbenchData.value = body
@@ -319,7 +319,7 @@ createApp({
       if (!selectedJobId.value || !workbenchData.value?.page?.url || !item?.payload) return
       aiPayloadRetestingIdx.value = idx
       try {
-        const res = await fetch(`${apiBase.value}/jobs/${selectedJobId.value}/pages/retest`, {
+        const res = await fetch(`${apiBase.value}/jobs/${selectedJobId.value}/pages/retest`, { // 复测 AI payload
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -366,7 +366,7 @@ createApp({
       workbenchRetesting.value = true
       workbenchRetestFeedback.value = '正在执行页面复测...'
       try {
-        const res = await fetch(`${apiBase.value}/jobs/${selectedJobId.value}/pages/retest`, {
+        const res = await fetch(`${apiBase.value}/jobs/${selectedJobId.value}/pages/retest`, { // 页面复测
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -415,7 +415,7 @@ createApp({
       deletingRetestResultId.value = String(resultId)
       try {
         const endpoint = `${apiBase.value}/jobs/${selectedJobId.value}/pages/retest-results/${encodeURIComponent(resultId)}?url=${encodeURIComponent(selectedPageUrl.value)}`
-        const res = await fetch(endpoint, { method: 'DELETE' })
+        const res = await fetch(endpoint, { method: 'DELETE' }) // 删除复测结果
         const body = await res.json()
         if (!res.ok) throw new Error(body.error || '删除复测结果失败')
         workbenchRetestFeedback.value = '复测结果已删除。'
@@ -432,7 +432,7 @@ createApp({
       aiExplainLoading.value = true
       aiExplainError.value = ''
       try {
-        const res = await fetch(`${apiBase.value}/jobs/${selectedJobId.value}/pages/ai-explain`, {
+        const res = await fetch(`${apiBase.value}/jobs/${selectedJobId.value}/pages/ai-explain`, { // AI 解释
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -457,7 +457,7 @@ createApp({
       aiValidateLoading.value = true
       aiValidateError.value = ''
       try {
-        const res = await fetch(`${apiBase.value}/jobs/${selectedJobId.value}/pages/ai-validate`, {
+        const res = await fetch(`${apiBase.value}/jobs/${selectedJobId.value}/pages/ai-validate`, { // AI 多轮验证
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -489,7 +489,7 @@ createApp({
       aiPayloadError.value = ''
       aiPayloadResult.value = null
       try {
-        const res = await fetch(`${apiBase.value}/jobs/${selectedJobId.value}/pages/ai-generate-payload`, {
+        const res = await fetch(`${apiBase.value}/jobs/${selectedJobId.value}/pages/ai-generate-payload`, { // AI 生成 payload
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -515,7 +515,7 @@ createApp({
       deletingAIMultiRoundReportId.value = batchId
       try {
         const endpoint = `${apiBase.value}/jobs/${selectedJobId.value}/pages/ai-validate-reports/${encodeURIComponent(batchId)}?url=${encodeURIComponent(selectedPageUrl.value)}`
-        const res = await fetch(endpoint, { method: 'DELETE' })
+        const res = await fetch(endpoint, { method: 'DELETE' }) // 删除 AI 验证记录
         const body = await res.json()
         if (!res.ok) throw new Error(body.error || '删除 AI 多轮验证记录失败')
         aiValidateError.value = ''
@@ -702,4 +702,3 @@ createApp({
     </div>
   `,
 }).mount('#app')
-
